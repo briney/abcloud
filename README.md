@@ -6,7 +6,7 @@ EC2 instance/cluster management. Still under active development, so expect chang
 Usage
 --------
 
-Launch a basic cluster named 'test' (1 master and 2 workers, all m3.large):  
+Launch a basic cluster named 'test' with a master and 2 workers, all m3.large:  
 `./abcloud launch test --workers 2`  
 
 Terminate the 'test' cluster:  
