@@ -1,4 +1,4 @@
-EC2_cluster
+AbCloud
 ==============
 
-Tools for cluster computing on EC2
+EC2 instance/cluster management
