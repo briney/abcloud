@@ -416,7 +416,7 @@ def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 	# start celery workers on all nodes (including master):
 	if opts.celery and opts.workers > 0:
 		start_celery_workers(master, worker_nodes, opts)
-		start_flower(master, opts)
+		start_flower(master_nodes[0], opts)
 
 	# configure and start a Jupyter server
 	if opts.jupyter:
@@ -524,15 +524,18 @@ def start_celery_workers(master, worker_nodes, opts):
 	if master_celery_processes > 0:
 		master_celery_cmd = celery_cmd + ' --concurrency={}'.format(master_celery_processes)
 		run_remote_cmd(master, opts, master_celery_cmd)
-	for worker in worker_ips:
+	progbar.distribute_ssh_keys_progbar(0, len(worker_nodes), '')
+	for i, worker_node in enumerate(worker_nodes):
+		worker = worker_node.ip_address
 		run_remote_cmd(worker, opts, celery_cmd)
+		progbar.distribute_ssh_keys_progbar(i + 1, len(worker_nodes), worker_node.tags['Name'])
 
 
 def start_flower(master, opts):
-	print('Starting Flower server...')
+	print('\nStarting Flower server...')
 	flower_cmd = '''cd /abstar && screen -d -m bash -c "/home/ubuntu/anaconda/bin/flower -A utils.queue.celery"'''
-	run_remote_cmd(master, opts, flower_cmd)
-	print('Flower URL: http://{}:5555'.format(master))
+	run_remote_cmd(master.ip_address, opts, flower_cmd)
+	print('Flower URL: http://{}:5555'.format(master.ip_address))
 
 
 def setup_jupyter_notebook(master, master_nodes, opts):
