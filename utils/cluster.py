@@ -26,6 +26,7 @@
 from __future__ import print_function
 
 import itertools
+import json
 import os
 import pipes
 import random
@@ -403,10 +404,10 @@ def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 	print('Updating /etc/hosts on all nodes...')
 	ips = [str(n.ip_address) for n in all_nodes]
 	host_string = '\n'.join(['{} {}'.format(i, n) for i, n in zip(ips, node_names)])
-	host_cmd = 'echo "{}" >> /etc/hosts'.format(host_string)
+	host_cmd = """sudo -- sh -c 'echo "{}" >> /etc/hosts'""".format(host_string)
 	for node in all_nodes:
 		node_address = ec2utils.get_dns_name(node, opts.private_ips)
-		run_remote_cmd(node_address, opts, host_cmd)
+		stdout, stderr = run_remote_cmd(node_address, opts, host_cmd)
 
 	# build and share an EBS RAID array on master node
 	if opts.master_ebs_vol_num > 0:
@@ -415,17 +416,7 @@ def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 	# start celery workers on all nodes (including master):
 	if opts.celery and opts.workers > 0:
 		start_celery_workers(master, worker_nodes, opts)
-		# print("\nStarting Celery worker processes on all worker nodes...")
-		# master_cpus = int(run_remote_cmd(master, opts, 'nproc').strip())
-		# master_celery_processes = master_cpus - 4
-		# celery_cmd = 'cd /abstar\
-		#    && chmod 777 -R /abstar\
-		#    && sudo -u ubuntu celery -A utils.queue.celery worker -l info --detach'
-		# if master_celery_processes > 0:
-		# 	master_celery_cmd = celery_cmd + ' --concurrency={}'.format(master_celery_processes)
-		# 	run_remote_cmd(master, opts, master_celery_cmd)
-		# for worker in worker_ips:
-		# 	run_remote_cmd(worker, opts, celery_cmd)
+		start_flower(master, opts)
 
 	# configure and start a Jupyter server
 	if opts.jupyter:
@@ -434,6 +425,8 @@ def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 	# configure and start a MongoDB server
 	if opts.mongodb:
 		setup_mongodb(master, master_nodes, opts)
+
+	write_config_info(master, opts)
 
 	print("\nDeploying files to master...")
 	# deploy_files(
@@ -502,7 +495,7 @@ def build_ebs_raid_volume(master, master_nodes, worker_nodes, opts):
 	if opts.workers > 0:
 		print('Adding nodes to /etc/exports on master node...')
 		for node in node_names:
-			export_cmd = 'sudo echo "{} {}(async,no_root_squash,no_subtree_check,rw)" >> /etc/exports'.format(
+			export_cmd = """sudo -- sh -c 'echo "{} {}(async,no_root_squash,no_subtree_check,rw)" >> /etc/exports'""".format(
 				opts.master_ebs_raid_dir, node)
 			run_remote_cmd(master, opts, export_cmd)
 		nfs_start_cmd = 'sudo exportfs -a && sudo /etc/init.d/nfs-kernel-server start'
@@ -525,16 +518,21 @@ def start_celery_workers(master, worker_nodes, opts):
 
 	# start celery workers on all nodes (including master)
 	print("\nStarting Celery worker processes on all worker nodes...")
-	master_cpus = int(run_remote_cmd(master, opts, 'nproc').strip())
+	master_cpus = int(run_remote_cmd(master, opts, 'nproc')[0].strip())
 	master_celery_processes = master_cpus - 4
-	celery_cmd = 'cd /abstar\
-	   && chmod 777 -R /abstar\
-	   && sudo -u ubuntu celery -A utils.queue.celery worker -l info --detach'
+	celery_cmd = 'cd /abstar && /home/ubuntu/anaconda/bin/celery -A utils.queue.celery worker -l info --detach'
 	if master_celery_processes > 0:
 		master_celery_cmd = celery_cmd + ' --concurrency={}'.format(master_celery_processes)
 		run_remote_cmd(master, opts, master_celery_cmd)
 	for worker in worker_ips:
 		run_remote_cmd(worker, opts, celery_cmd)
+
+
+def start_flower(master, opts):
+	print('Starting Flower server...')
+	flower_cmd = '''cd /abstar && screen -d -m bash -c "/home/ubuntu/anaconda/bin/flower -A utils.queue.celery"'''
+	run_remote_cmd(master, opts, flower_cmd)
+	print('Flower URL: http://{}:5555'.format(master))
 
 
 def setup_jupyter_notebook(master, master_nodes, opts):
@@ -586,6 +584,24 @@ def setup_mongodb(master, master_nodes, opts):
 	stdout, stderr = run_remote_cmd(master, opts, mongod_start_cmd)
 	print('MongoDB database location: {}'.format(dbpath))
 	print('MongoDB log location: /log/mongod.log')
+
+
+def write_config_info(master, opts):
+	config_file = '/home/ubuntu/.abcloud_config'
+	config = {}
+	config['master_ebs_volume_num'] = opts.master_ebs_vol_num
+	config['master_ebs_volume_size'] = opts.master_ebs_vol_size
+	config['master_ebs_raid_level'] = opts.master_ebs_raid_level
+	config['master_ebs_raid_dir'] = opts.master_ebs_raid_dir
+	config['celery'] = opts.celery
+	config['mongo'] = opts.mongodb
+	config['jupyter'] = opts.jupyter
+	config['jupyter_port'] = opts.jupyter_port
+	config['jupyter_password'] = opts.jupyter_password
+	config['abtools_version'] = opts.abtools_version
+	jstring = json.dumps(config)
+	write_config_cmd = "sudo echo '%s' >> %s" % (jstring, config_file)
+	run_remote_cmd(master, opts, write_config_cmd)
 
 
 def _launch_cluster(conn, opts, cluster_name):
@@ -863,19 +879,24 @@ def _launch_cluster(conn, opts, cluster_name):
 		if len(master_nodes) > 1:
 			zeroes = 2 - len(str(i + 1))
 			master_num = '0' * zeroes + str(i + 1)
+			master_prefix = 'master'.format(cluster_name)
 		else:
 			master_num = ''
+			if opts.workers == 0:
+				master_prefix = cluster_name
+			else:
+				master_prefix = 'master'.format(cluster_name)
 		master.add_tag(
 			key='Name',
 			# value='{cn}-master{num}'.format(cn=cluster_name, num=master_num))
-			value='master{num}'.format(num=master_num))
+			value='{prefix}{num}'.format(prefix=master_prefix, num=master_num))
 	for i, worker in enumerate(worker_nodes):
 		zeroes = 3 - len(str(i + 1))
 		worker_num = '0' * zeroes + str(i + 1)
 		worker.add_tag(
 			key='Name',
 			# value='{cn}-worker{num}'.format(cn=cluster_name, num=worker_num))
-			value='worker{num}'.format(num=worker_num))
+			value='node{num}'.format(num=worker_num))
 
 	# Return all the instances
 	return (master_nodes, worker_nodes)
@@ -895,7 +916,7 @@ def _destroy_cluster(conn, opts, cluster_name, master_nodes, worker_nodes):
 
 	# Delete security groups as well
 	if opts.delete_groups:
-		group_names = [cluster_name + "-master", cluster_name + "-workers"]
+		group_names = ['@abcloud-' + cluster_name + "-master", '@abcloud-' + cluster_name + "-workers"]
 		wait_for_cluster_state(
 			conn=conn,
 			opts=opts,

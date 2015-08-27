@@ -65,7 +65,7 @@ else:
 def parse_args():
 	parser = OptionParser(
 		prog="ec2-cluster",
-		version="%prog {v}".format(v=EC2_CLUSTER_VERSION),
+		version="%prog {v}".format(v=ABCLOUD_VERSION),
 		usage="%prog [options] <action> <cluster_name>\n\n"
 		+ "<action> can be: launch, destroy, sshmaster, sshnode, list, stop, " +
 		"start, get-master, or reboot-workers")
@@ -248,10 +248,15 @@ def parse_args():
 			 "requires that.")
 
 	(opts, args) = parser.parse_args()
-	if len(args) != 2:
+	if len(args) == 2:
+		(action, cluster_name) = args
+	elif len(args) == 1 and args[0] == 'list':
+		action = args[0]
+		cluster_name = None
+	else:
 		parser.print_help()
 		sys.exit(1)
-	(action, cluster_name) = args
+	# (action, cluster_name) = args
 
 	# Boto config check
 	# http://boto.cloudhackers.com/en/latest/boto_config_tut.html
@@ -352,7 +357,7 @@ def real_main():
 	# 	login(conn, opts, cluster_name)
 
 	elif action == 'list':
-		from utils.cluster import list_instances
+		from utils.list_instances import list_instances
 		list_instances(conn, opts)
 
 	elif action == "sshmaster":

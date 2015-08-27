@@ -26,6 +26,7 @@
 from __future__ import print_function
 
 import itertools
+import sys
 
 
 def get_or_make_group(conn, name, vpc_id):
@@ -42,13 +43,14 @@ def get_or_make_group(conn, name, vpc_id):
 		return conn.create_security_group(name, "EC2 Cluster group", vpc_id)
 
 
-def get_existing_cluster(conn, opts, cluster_name, die_on_error=True):
+def get_existing_cluster(conn, opts, cluster_name, die_on_error=True, quiet=False):
 	"""
 	Get the EC2 instances in an existing cluster if available.
 	Returns a tuple of lists of EC2 instance objects for the masters and workers.
 	"""
-	print("\nSearching for existing cluster '{c}' in region {r}...".format(
-		  c=cluster_name, r=opts.region))
+	if not quiet:
+		print("\nSearching for existing cluster '{c}' in region {r}...".format(
+			  c=cluster_name, r=opts.region))
 
 	def get_instances(group_names):
 		"""
@@ -66,11 +68,12 @@ def get_existing_cluster(conn, opts, cluster_name, die_on_error=True):
 	worker_instances = get_instances(['@abcloud-' + cluster_name + "-workers"])
 
 	if any((master_instances, worker_instances)):
-		print("Found {m} master{plural_m} and {s} worker{plural_s}.".format(
-			  m=len(master_instances),
-			  plural_m=('' if len(master_instances) == 1 else 's'),
-			  s=len(worker_instances),
-			  plural_s=('' if len(worker_instances) == 1 else 's')))
+		if not quiet:
+			print("Found {m} master{plural_m} and {s} worker{plural_s}.".format(
+				  m=len(master_instances),
+				  plural_m=('' if len(master_instances) == 1 else 's'),
+				  s=len(worker_instances),
+				  plural_s=('' if len(worker_instances) == 1 else 's')))
 
 	if not master_instances and die_on_error:
 		print("ERROR: Could not find a master for cluster {c} in region {r}.".format(
