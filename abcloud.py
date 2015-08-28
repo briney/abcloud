@@ -51,6 +51,7 @@ import boto
 from boto import ec2
 
 from utils.config import *
+from utils.ec2utils import get_existing_cluster
 
 if sys.version < "3":
 	from urllib2 import urlopen, Request, HTTPError
@@ -67,7 +68,7 @@ def parse_args():
 		prog="ec2-cluster",
 		version="%prog {v}".format(v=ABCLOUD_VERSION),
 		usage="%prog [options] <action> <cluster_name>\n\n"
-		+ "<action> can be: launch, destroy, sshmaster, sshnode, list, stop, " +
+		+ "<action> can be: launch, destroy, sshmaster, sshnode, put, get, list, stop, " +
 		"start, get-master, or reboot-workers")
 
 	parser.add_option(
@@ -88,7 +89,7 @@ def parse_args():
 		help="Master instance type (leave empty for same as instance-type)")
 	parser.add_option(
 		"--node", default=None,
-		help="Node to SSH into (use with sshmaster or sshnode actions)")
+		help="Node to SSH into (use with sshmaster or sshnode actions) or for put/get operations.")
 	parser.add_option(
 		"-r", "--region", default="us-east-1",
 		help="EC2 region used to launch instances in, or to find them in (default: %default)")
@@ -192,6 +193,9 @@ def parse_args():
 		"--no-celery", action="store_false", dest="celery", default=True,
 		help="Disable Celery configuration on the cluster.")
 	parser.add_option(
+		"--no-basespace_credentials", action="store_false", dest="basespace_credentials", default=True,
+		help="If set, BaseSpace credentials file will NOT be uploaded to the server/cluster.")
+	parser.add_option(
 		"-u", "--user", default="ubuntu",
 		help="The SSH user you want to connect as (default: %default)")
 	parser.add_option(
@@ -216,6 +220,12 @@ def parse_args():
 		"--mongodb", action="store_true", default=False,
 		help="Set up a MongoDB server on the master instance. Database will be located at <master-ebs_raid-dir>/db. " +
 			 "At the current time, auth is not enabled when launching mongod.")
+	parser.add_option(
+		"--localpath", default=None,
+		help="Local path for put/get operations")
+	parser.add_option(
+		"--remotepath", default=None,
+		help="Remote path for put/get operations")
 	# parser.add_option(
 	# 	"--worker-instances", type="int", default=1,
 	# 	help="Number of instances per worker: variable SPARK_WORKER_INSTANCES. Not used if YARN " +
@@ -253,6 +263,12 @@ def parse_args():
 	elif len(args) == 1 and args[0] == 'list':
 		action = args[0]
 		cluster_name = None
+	elif args[0] in ['put', 'get'] and len(args) == 4:
+		(action, cluster_name, filepath1, filepath2) = args
+		if action == 'put':
+			opts.localpath, opts.remotepath = filepath1, filepath2
+		else:
+			opts.remotepath, opts.localpath = filepath1, filepath2
 	else:
 		parser.print_help()
 		sys.exit(1)
@@ -403,10 +419,41 @@ def real_main():
 			from utils.cluster import stop_cluster
 			stop_cluster(conn, opts, cluster_name, die_on_error=False)
 
-	# Start an existing (but stopped) cluster
 	elif action == "start":
+		# Start an existing (but stopped) cluster
 		from utils.cluster import start_cluster
 		start_cluster(conn, opts, cluster_name)
+
+	elif action in ['put', 'get']:
+		# get node IP address
+		(master_nodes, worker_nodes) = get_existing_cluster(
+			conn, opts, cluster_name, quiet=True)
+		all_nodes = master_nodes + worker_nodes
+		if not opts.node:
+			inst = master_nodes[0]
+		else:
+			inst = [n for n in all_nodes if n.tags['Name'] == opts.node][0]
+		node = inst.ip_address
+
+		# put or get
+		if action == 'put':
+			print('\nTransferring {local} to {node}:{remote} ... '.format(
+				local=opts.localpath, node=inst.tags['Name'], remote=opts.remotepath), end='')
+			sys.stdout.flush()
+			putget_cmd = 'scp -i {key} {local} {user}@{node}:{remote}'.format(
+				key=opts.identity_file, local=opts.localpath,
+				user=opts.user, node=node, remote=opts.remotepath)
+		else:
+			print('\nTransferring {node}:{remote} to {local} ... '.format(
+				local=opts.localpath, node=inst.tags['Name'], remote=opts.remotepath), end='')
+			sys.stdout.flush()
+			putget_cmd = 'scp -i {key} {user}@{node}:{remote} {local}'.format(
+				key=opts.identity_file, local=opts.localpath,
+				user=opts.user, node=node, remote=opts.remotepath)
+		p = subprocess.Popen(putget_cmd, shell=True,
+			stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		stdout, stderr = p.communicate()
+		print('Done\n')
 
 	else:
 		print("Invalid action: %s" % action, file=stderr)

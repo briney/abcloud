@@ -83,7 +83,7 @@ def destroy_cluster(conn, opts, cluster_name):
 
 
 def ssh_node(conn, opts, cluster_name, node_type='master'):
-	(master_nodes, worker_nodes) = ec2utils.get_existing_cluster(conn, opts, cluster_name)
+	(master_nodes, worker_nodes) = ec2utils.get_existing_cluster(conn, opts, cluster_name, quiet=True)
 	if node_type == 'master':
 		if len(master_nodes) == 1:
 			instance = master_nodes[0]
@@ -314,20 +314,46 @@ def ssh(host, opts, command, quiet=False):
 
 
 def run_remote_cmd(node, opts, cmd, user=None):
-		'''
-		Remotely runs 'cmd' on 'node' and blocks until 'cmd' completes.
-		Returns 'cmd' stdout.
-		'''
-		if not user:
-			user = opts.user
-		ssh = paramiko.SSHClient()
-		ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-		ssh.connect(node, username=user, key_filename=opts.identity_file)
-		stdin, stdout, stderr = ssh.exec_command(cmd)
-		channel = stdout.channel
-		while not channel.exit_status_ready():
-			time.sleep(1)
-		return stdout.read(), stderr.read()
+	'''
+	Remotely runs 'cmd' on 'node' and blocks until 'cmd' completes.
+	Returns 'cmd' stdout.
+	'''
+	if not user:
+		user = opts.user
+	ssh = paramiko.SSHClient()
+	ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	ssh.connect(node, username=user, key_filename=opts.identity_file)
+	stdin, stdout, stderr = ssh.exec_command(cmd)
+	channel = stdout.channel
+	while not channel.exit_status_ready():
+		time.sleep(1)
+	return stdout.read(), stderr.read()
+
+
+def put(node, local, remote, opts, user=None):
+	if not user:
+		user = opts.user
+	mkdir_cmd = 'sudo mkdir -p %s && sudo chmod 777 %s' % (
+		os.path.dirname(remote), os.path.dirname(remote))
+	# run_remote_cmd(node, opts, mkdir_cmd)
+	ssh = paramiko.SSHClient()
+	ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	ssh.connect(node, username=user, key_filename=opts.identity_file)
+	ssh.exec_command(mkdir_cmd)
+	sftp = ssh.open_sftp()
+	sftp.put(local, remote)
+	sftp.close()
+
+
+def get(node, remote, local, opts, user=None):
+	if not user:
+		user = opts.user
+	ssh = paramiko.SSHClient()
+	ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	ssh.connect(node, username=user, key_filename=opts.identity_file)
+	sftp = ssh.open_sftp()
+	sftp.get(remote, local)
+	sftp.close()
 
 
 def _check_output(*popenargs, **kwargs):
@@ -417,6 +443,16 @@ def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 	if opts.celery and opts.workers > 0:
 		start_celery_workers(master, worker_nodes, opts)
 		start_flower(master_nodes[0], opts)
+
+	# upload BaseSpace credentials file
+	if opts.basespace_credentials:
+		print('\nUploading BaseSpace credentials file...')
+		cred_file = os.path.expanduser('~/.abstar/basespace_credentials')
+		remote_path = '/home/{}/.abstar/basespace_credentials'.format(opts.user)
+		if os.path.exists(cred_file):
+			put(master, cred_file, remote_path, opts)
+		else:
+			print('ERROR: Local credentials file was not found. No credentials were uploaded.')
 
 	# configure and start a Jupyter server
 	if opts.jupyter:
@@ -596,6 +632,7 @@ def write_config_info(master, opts):
 	config['master_ebs_volume_size'] = opts.master_ebs_vol_size
 	config['master_ebs_raid_level'] = opts.master_ebs_raid_level
 	config['master_ebs_raid_dir'] = opts.master_ebs_raid_dir
+	config['basespace'] = opts.basespace_credentials
 	config['celery'] = opts.celery
 	config['mongo'] = opts.mongodb
 	config['jupyter'] = opts.jupyter

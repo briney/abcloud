@@ -33,7 +33,7 @@ from utils.cluster import run_remote_cmd
 
 def list_instances(conn, opts):
 	all_groups = conn.get_all_security_groups()
-	abcloud_groups = list(set(['-'.join(g.name.split('-')[1:-1]) for g in all_groups if g.name.startswith('@abcloud')]))
+	abcloud_groups = sorted(list(set(['-'.join(g.name.split('-')[1:-1]) for g in all_groups if g.name.startswith('@abcloud')])))
 	print_groups_info(abcloud_groups)
 	for ag in abcloud_groups:
 		master_instances, worker_instances = ec2utils.get_existing_cluster(conn, opts, ag, quiet=True)
@@ -77,6 +77,10 @@ def print_cluster_info(name, masters, workers, opts):
 			print('worker instance IP address{}: {}'.format(wplural, wips))
 
 		if cfg:
+			if cfg['basespace']:
+				print('\nBaseSpace credentials have been uploaded')
+			elif check_for_basespace_credentials(master, opts):
+				print('\nBaseSpace credentials have been uploaded')
 			if cfg['mongo']:
 				print('\nMaster node is configured as a MongoDB server.')
 				print('MongoDB database is located at: {}'.format(os.path.join(opts.master_ebs_raid_dir, 'db')))
@@ -116,3 +120,12 @@ def get_celery_info(master, opts):
 		if 'OK' in inst:
 			running += 1
 	return total, running
+
+
+def check_for_basespace_credentials(master, opts):
+	cred_dir = '/home/{}/.abstar/'.format(opts.user)
+	cred_cmd = 'ls %s' % cred_dir
+	stdout, stderr = run_remote_cmd(master, opts, cred_cmd)
+	if 'basespace_credentials' in stdout:
+		return True
+	return False
