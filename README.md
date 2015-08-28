@@ -9,6 +9,15 @@ Usage
 Launch a basic cluster named 'test' with a master and 2 workers, all m3.large:  
 `./abcloud launch test --workers 2`  
   
+Launch a basic 'test' cluster with spot instance workers and a max price of $1.00/hr:  
+`./abcloud launch test --workers 2 --spot-price 1.00`  
+  
+SSH into the master instance of the 'test' cluster:  
+`./abcloud sshmaster test`
+  
+SSH into node001 of the 'test' cluster:  
+`./abcloud sshnode test --node node001`
+  
 Put a file (local path: '~/myfile') onto the master instance of the 'test' cluster (remote path: '/scratch'):  
 `./abcloud put test ~/myfile /scratch`
   
