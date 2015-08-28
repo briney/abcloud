@@ -4,8 +4,9 @@ AbCloud
 EC2 instance/cluster management. Still under active development, so expect changes.
 
 Usage
---------
-
+--------  
+`./abcloud <command> <cluster_name> [options]`  
+  
 Launch a basic cluster named 'test' with a master and 2 workers, all m3.large:  
 `./abcloud launch test --workers 2`  
   
