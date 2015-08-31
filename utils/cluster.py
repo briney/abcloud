@@ -1006,11 +1006,6 @@ def _launch_cluster(conn, opts, cluster_name):
 			value='node{num}'.format(num=worker_num))
 
 	# Return all the instances
-
-
-	print(master_nodes)
-
-
 	return (master_nodes, worker_nodes)
 
 
