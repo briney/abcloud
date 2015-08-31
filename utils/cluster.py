@@ -35,6 +35,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import traceback
 from datetime import datetime
 from sys import stderr
 
@@ -80,6 +81,23 @@ def destroy_cluster(conn, opts, cluster_name):
 	if response.upper() == "Y":
 		_destroy_cluster(conn, opts, cluster_name, master_nodes, worker_nodes)
 	print('\nDone!\n\n')
+
+
+def resize_cluster(conn, opts, cluster_name):
+	(master_nodes, worker_nodes) = ec2utils.get_existing_cluster(
+		conn, opts, cluster_name, die_on_error=False)
+	if not master_nodes and not worker_nodes:
+		print('No instances exist for cluster {}'.format(cluster_name))
+		print('At least a single master instance must exist \
+			for the cluster to be resized.')
+		sys.exit(1)
+	if args.add_nodes and args.remove_nodes:
+		print("You can't add and remove nodes at the same time.")
+		sys.exit(1)
+	if args.add_nodes > 1:
+		master_nodes, worker_nodes = add_nodes(master_nodes, worker_nodes, opts, cluster_name)
+	if args.remove_nodes > 1:
+		aster_nodes, worker_nodes = remove_nodes(master_nodes, worker_nodes, opts, cluster_name)
 
 
 def ssh_node(conn, opts, cluster_name, node_type='master'):
@@ -833,7 +851,9 @@ def _launch_cluster(conn, opts, cluster_name):
 					for r in reqs:
 						id_to_req[r.id] = r
 					active_instance_ids = []
+					statuses = []
 					for i in my_req_ids:
+						statuses.append(id_to_req[i].status.code)
 						if i in id_to_req and id_to_req[i].state == "active":
 							active_instance_ids.append(id_to_req[i].instance_id)
 					if len(active_instance_ids) == opts.workers:
@@ -844,9 +864,9 @@ def _launch_cluster(conn, opts, cluster_name):
 							worker_nodes += r.instances
 						break
 					else:
+						status = 'pending-evaluation' if 'pending-evaluation' in statuses else 'pending-fulfillment'
 						num_active = len(active_instance_ids)
-						print("\r%d of %d workers granted, still waiting for %d workers" % (
-							num_active, opts.workers, opts.workers - num_active))
+						progbar.distribute_ssh_keys_progbar(num_active, opts.workers, status)
 			except:
 				print("Canceling spot instance requests")
 				conn.cancel_spot_instance_requests(my_req_ids)
@@ -897,18 +917,65 @@ def _launch_cluster(conn, opts, cluster_name):
 			master_type = opts.instance_type
 		if opts.zone == 'all':
 			opts.zone = random.choice(conn.get_all_zones()).name
-		master_res = image.run(key_name=opts.key_pair,
-							   security_group_ids=[master_group.id] + additional_group_ids,
-							   instance_type=master_type,
-							   placement=opts.zone,
-							   min_count=1,
-							   max_count=1,
-							   block_device_map=master_block_map,
-							   subnet_id=opts.subnet_id,
-							   placement_group=opts.placement_group,
-							   user_data=user_data_content)
+		if opts.force_spot_master:
+			# Launch spot instances with the requested price
+			print("Requesting master as a spot instance with max price $%.3f" %
+				  (opts.spot_price))
+			req = conn.request_spot_instances(
+					price=opts.spot_price,
+					image_id=opts.ami,
+					launch_group="launch-group-%s" % cluster_name,
+					placement=opts.zone,
+					count=1,
+					key_name=opts.key_pair,
+					security_group_ids=[master_group.id] + additional_group_ids,
+					instance_type=master_type,
+					block_device_map=master_block_map,
+					subnet_id=opts.subnet_id,
+					placement_group=opts.placement_group,
+					user_data=user_data_content)
+			master_req = list(req)[0]
+			master_req_id = master_req.id
 
-		master_nodes = master_res.instances
+			print("Waiting for spot instance to be granted...")
+			try:
+				while True:
+					time.sleep(10)
+					reqs = conn.get_all_spot_instance_requests()
+					master_req = [r for r in reqs if r.id == master_req_id][0]
+					if master_req.state == 'active':
+						reservations = conn.get_all_reservations([master_req.instance_id])
+						master_res = reservations[0]
+						master_nodes = master_res.instances
+						progbar.distribute_ssh_keys_progbar(1, 1, master_req.status.code)
+						print()
+						break
+					else:
+						progbar.distribute_ssh_keys_progbar(0, 1, master_req.status.code)
+			except Exception, err:
+				print(traceback.format_exc())
+				print("Canceling spot instance requests")
+				conn.cancel_spot_instance_requests(my_req_ids)
+				# Log a warning if any of these requests actually launched instances:
+				(master_nodes, worker_nodes) = ec2utils.get_existing_cluster(
+					conn, opts, cluster_name, die_on_error=False)
+				running = len(master_nodes) + len(worker_nodes)
+				if running:
+					print(("WARNING: %d instances are still running" % running), file=stderr)
+				sys.exit(0)
+
+		else:
+			master_res = image.run(key_name=opts.key_pair,
+								   security_group_ids=[master_group.id] + additional_group_ids,
+								   instance_type=master_type,
+								   placement=opts.zone,
+								   min_count=1,
+								   max_count=1,
+								   block_device_map=master_block_map,
+								   subnet_id=opts.subnet_id,
+								   placement_group=opts.placement_group,
+								   user_data=user_data_content)
+			master_nodes = master_res.instances
 		print("Launched master in %s, regid = %s" % (opts.zone, master_res.id))
 
 	# This wait time corresponds to SPARK-4983
@@ -939,6 +1006,11 @@ def _launch_cluster(conn, opts, cluster_name):
 			value='node{num}'.format(num=worker_num))
 
 	# Return all the instances
+
+
+	print(master_nodes)
+
+
 	return (master_nodes, worker_nodes)
 
 

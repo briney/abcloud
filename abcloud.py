@@ -185,6 +185,10 @@ def parse_args():
 		"--spot-price", metavar="PRICE", type="float",
 		help="If specified, launch workers as spot instances with the given " +
 			 "maximum price (in dollars)")
+	parser.add_option(
+		"--force-spot-master", default=False, action='store_true',
+		help="If specified, master will be launched as a spot instance " +
+			 "using --spot-price as maximum price.")
 	# parser.add_option(
 	# 	"--ganglia", action="store_true", default=True,
 	# 	help="Setup Ganglia monitoring on cluster (default: %default). NOTE: " +
