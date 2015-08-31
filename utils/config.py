@@ -24,7 +24,7 @@
 
 
 ABCLOUD_VERSION = "0.0.1"
-DEFAULT_ABTOOLS_VERSION = "0.3.4"
+DEFAULT_ABTOOLS_VERSION = "0.3.6"
 
 IDENTITY_FILE_PATH = '/Users/bryanbriney/Google_Drive/burton_lab/AWS/default.pem'
 MASTER_INSTANCE_TYPE = 'm3.large'
@@ -49,6 +49,8 @@ VALID_ABTOOLS_VERSIONS = set([
 	"0.3.2",
 	"0.3.3",
 	"0.3.4",
+	"0.3.5",
+	"0.3.6",
 ])
 
 ABTOOLS_AMI_MAP = {
@@ -69,6 +71,8 @@ ABTOOLS_AMI_MAP = {
 	"0.3.2": 'ami-8746feec',
 	"0.3.3": 'ami-5d08b036',
 	"0.3.4": 'ami-03a91268',
+	"0.3.5": 'ami-5d299336',
+	"0.3.6": 'ami-d11aa0ba',
 }
 
 # Source: http://aws.amazon.com/amazon-linux-ami/instance-type-matrix/
@@ -81,7 +85,7 @@ EC2_INSTANCE_TYPES = {
 	"c3.xlarge": "pvm",
 	"c3.2xlarge": "pvm",
 	"c3.4xlarge": "pvm",
-	"c3.8xlarge": "pvm",
+	"c3.8xlarge": "hvm",
 	"c4.large": "hvm",
 	"c4.xlarge": "hvm",
 	"c4.2xlarge": "hvm",
@@ -114,6 +118,11 @@ EC2_INSTANCE_TYPES = {
 	"m3.large": "hvm",
 	"m3.xlarge": "hvm",
 	"m3.2xlarge": "hvm",
+	"m4.large": "hvm",
+	"m4.xlarge": "hvm",
+	"m4.2xlarge": "hvm",
+	"m4.4xlarge": "hvm",
+	"m4.10xlarge": "hvm",
 	"r3.large": "hvm",
 	"r3.xlarge": "hvm",
 	"r3.2xlarge": "hvm",
