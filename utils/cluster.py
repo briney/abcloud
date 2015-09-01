@@ -88,16 +88,16 @@ def resize_cluster(conn, opts, cluster_name):
 		conn, opts, cluster_name, die_on_error=False)
 	if not master_nodes and not worker_nodes:
 		print('No instances exist for cluster {}'.format(cluster_name))
-		print('At least a single master instance must exist \
+		print('At minimum, a single master instance must exist \
 			for the cluster to be resized.')
 		sys.exit(1)
-	if args.add_nodes and args.remove_nodes:
+	if opts.add_nodes and opts.remove_nodes:
 		print("You can't add and remove nodes at the same time.")
 		sys.exit(1)
-	if args.add_nodes > 1:
-		master_nodes, worker_nodes = add_nodes(master_nodes, worker_nodes, opts, cluster_name)
-	if args.remove_nodes > 1:
-		aster_nodes, worker_nodes = remove_nodes(master_nodes, worker_nodes, opts, cluster_name)
+	if opts.add_nodes > 0:
+		add_nodes(conn, master_nodes, worker_nodes, opts, cluster_name)
+	if opts.remove_nodes > 0:
+		remove_nodes(conn, master_nodes, worker_nodes, opts, cluster_name)
 
 
 def ssh_node(conn, opts, cluster_name, node_type='master'):
@@ -417,6 +417,45 @@ def ssh_write(host, opts, command, arguments):
 			tries = tries + 1
 
 
+def add_nodes(conn, master_nodes, worker_nodes, opts, cluster_name):
+	from utils.list_instances import get_config
+	cfg = get_config(master_nodes[0], opts)
+	added_workers = _launch_instances(
+		conn, opts, cluster_name,
+		node_type='worker', resize=True, start_count=len(worker_nodes))
+	wait_for_cluster_state(
+		conn=conn,
+		opts=opts,
+		cluster_instances=(added_workers),
+		cluster_state='ssh-ready')
+	_add_nodes_to_hosts_file(
+		master_nodes, worker_nodes, opts, cluster_name, added_workers=list(added_workers))
+	_share_master_nfs_volume(
+		master_nodes, added_workers, opts, cluster_name, cfg, resize=True)
+	if cfg['celery']:
+		start_celery_workers(master_nodes[0].ip_address, added_workers, opts)
+
+
+def remove_nodes(conn, master_nodes, worker_nodes, opts, cluster_name):
+	# we want to remove workers with the highest worker number
+	sorted_workers = sorted(worker_nodes, key=lambda x: x.tags['Name'], reverse=True)
+	to_delete = sorted_workers[:opts.remove_nodes]
+	# warn user, then terminate the instances
+	print("\nThe following instances will be terminated:")
+	for inst in to_delete:
+		try:
+			name = inst.tags['Name']
+		except KeyError:
+			name = 'unnamed node'
+		print("> %s (%s)" % (name, ec2utils.get_dns_name(inst, opts.private_ips)))
+	print("\nWARNING: ALL DATA ON ALL NODES WILL BE LOST!!")
+	msg = "Are you sure you want to destroy this cluster? (y/N) "
+	response = raw_input(msg)
+	if response.upper() == "Y":
+		for inst in to_delete:
+			inst.terminate()
+	print('\nDone!\n\n')
+
 
 def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 	all_nodes = master_nodes + worker_nodes
@@ -503,6 +542,236 @@ def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 	print("\nRunning setup on master...")
 	# setup_spark_cluster(master, opts)
 	print("\nDone!\n\n")
+
+
+def _get_image_from_ami(conn, opts):
+	if opts.ami is None:
+		from utils.config import ABTOOLS_AMI_MAP
+		opts.ami = ABTOOLS_AMI_MAP[opts.abtools_version]
+	try:
+		image = conn.get_all_images(image_ids=[opts.ami])[0]
+		return image
+	except:
+		print("Could not find AMI " + opts.ami, file=stderr)
+		sys.exit(1)
+
+
+def _launch_instances(conn, opts, cluster_name, node_type='master', resize=False, start_count=0):
+	worker_group = ec2utils.get_or_make_group(conn, '@abcloud-' + cluster_name + "-workers", opts.vpc_id)
+	additional_group_ids = []
+	if opts.additional_security_group:
+		additional_group_ids = [sg.id
+			for sg in conn.get_all_security_groups()
+			if opts.additional_security_group in (sg.name, sg.id)]
+
+	image = _get_image_from_ami(conn, opts)
+
+	user_data_content = None
+	if opts.user_data:
+		with open(opts.user_data) as user_data_file:
+			user_data_content = user_data_file.read()
+
+	# Create block device mapping so that we can add EBS volumes if asked to.
+	# The first drive is attached as /dev/sds, 2nd as /dev/sdt, ... /dev/sdz
+	block_map = BlockDeviceMapping()
+	if opts.ebs_vol_size > 0:
+		for i in range(opts.ebs_vol_num):
+			device = EBSBlockDeviceType()
+			device.size = opts.ebs_vol_size
+			device.volume_type = opts.ebs_vol_type
+			device.delete_on_termination = True
+			block_map["/dev/xvda" + chr(ord('a') + i)] = device
+
+	# AWS ignores the AMI-specified block device mapping for M3 (see SPARK-3342).
+	if opts.instance_type.split('.')[0] in ['m3', ]:
+		for i in range(ec2utils.get_num_disks(opts.instance_type)):
+			dev = BlockDeviceType()
+			dev.ephemeral_name = 'ephemeral%d' % i
+			# The first ephemeral drive is /dev/xvdb.
+			name = '/dev/xvd' + string.letters[i + 1]
+			block_map[name] = dev
+
+	# Launch workers
+	num_workers = opts.add_nodes if resize else opts.workers
+	if opts.spot_price is not None:
+		# Launch spot instances with the requested price
+		print("Requesting %d workers as spot instances with max price $%.3f" %
+			  (num_workers, opts.spot_price))
+		zones = ec2utils.get_zones(conn, opts)
+		num_zones = len(zones)
+		i = 0
+		my_req_ids = []
+		for zone in zones:
+			num_workers_this_zone = ec2utils.get_partition(num_workers, num_zones, i)
+			worker_reqs = conn.request_spot_instances(
+				price=opts.spot_price,
+				image_id=opts.ami,
+				launch_group="launch-group-%s" % cluster_name,
+				placement=zone,
+				count=num_workers_this_zone,
+				key_name=opts.key_pair,
+				security_group_ids=[worker_group.id] + additional_group_ids,
+				instance_type=opts.instance_type,
+				block_device_map=block_map,
+				subnet_id=opts.subnet_id,
+				placement_group=opts.placement_group,
+				user_data=user_data_content)
+			my_req_ids += [req.id for req in worker_reqs]
+			i += 1
+
+		print("Waiting for spot instances to be granted...")
+		try:
+			while True:
+				time.sleep(10)
+				reqs = conn.get_all_spot_instance_requests()
+				id_to_req = {}
+				for r in reqs:
+					id_to_req[r.id] = r
+				active_instance_ids = []
+				statuses = []
+				for i in my_req_ids:
+					statuses.append(id_to_req[i].status.code)
+					if i in id_to_req and id_to_req[i].state == "active":
+						active_instance_ids.append(id_to_req[i].instance_id)
+				if len(active_instance_ids) == opts.workers:
+					print("All %d workers granted" % num_workers)
+					reservations = conn.get_all_reservations(active_instance_ids)
+					worker_nodes = []
+					for r in reservations:
+						worker_nodes += r.instances
+					break
+				else:
+					status = 'pending-evaluation' if 'pending-evaluation' in statuses else 'pending-fulfillment'
+					num_active = len(active_instance_ids)
+					progbar.distribute_ssh_keys_progbar(num_active, num_workers, status)
+		except:
+			print("Canceling spot instance requests")
+			conn.cancel_spot_instance_requests(my_req_ids)
+			# Log a warning if any of these requests actually launched instances:
+			(master_nodes, worker_nodes) = ec2utils.get_existing_cluster(
+				conn, opts, cluster_name, die_on_error=False)
+			running = len(master_nodes) + len(worker_nodes)
+			if running:
+				print(("WARNING: %d instances are still running" % running), file=stderr)
+			sys.exit(0)
+	else:
+		# Launch non-spot instances
+		zones = ec2utils.get_zones(conn, opts)
+		num_zones = len(zones)
+		i = 0
+		worker_nodes = []
+		for zone in zones:
+			num_workers_this_zone = ec2utils.get_partition(num_workers, num_zones, i)
+			if num_workers_this_zone > 0:
+				worker_res = image.run(key_name=opts.key_pair,
+									  security_group_ids=[worker_group.id] + additional_group_ids,
+									  instance_type=opts.instance_type,
+									  placement=zone,
+									  min_count=num_workers_this_zone,
+									  max_count=num_workers_this_zone,
+									  block_device_map=block_map,
+									  subnet_id=opts.subnet_id,
+									  placement_group=opts.placement_group,
+									  user_data=user_data_content)
+				worker_nodes += worker_res.instances
+				print("Launched {s} worker{plural_s} in {z}, regid = {r}".format(
+					  s=num_workers_this_zone,
+					  plural_s=('' if num_workers_this_zone == 1 else 's'),
+					  z=zone,
+					  r=worker_res.id))
+			i += 1
+
+	# This wait time corresponds to SPARK-4983
+	print("\nWaiting for AWS to propagate instance metadata...")
+	time.sleep(5)
+	# Give the instances descriptive names
+	if node_type == 'master':
+		for i, master in enumerate(worker_nodes):
+			if len(worker_nodes) > 1:
+				zeroes = 2 - len(str(i + 1))
+				master_num = '0' * zeroes + str(i + 1)
+				master_prefix = 'master'.format(cluster_name)
+			else:
+				master_num = ''
+				if opts.workers == 0:
+					master_prefix = cluster_name
+				else:
+					master_prefix = 'master'.format(cluster_name)
+			master.add_tag(
+				key='Name',
+				# value='{cn}-master{num}'.format(cn=cluster_name, num=master_num))
+				value='{prefix}{num}'.format(prefix=master_prefix, num=master_num))
+	else:
+		for i, worker in enumerate(worker_nodes):
+			zeroes = 3 - len(str(i + 1 + start_count))
+			worker_num = '0' * zeroes + str(i + 1 + start_count)
+			worker.add_tag(
+				key='Name',
+				# value='{cn}-worker{num}'.format(cn=cluster_name, num=worker_num))
+				value='node{num}'.format(num=worker_num))
+
+	return worker_nodes
+
+
+def _add_nodes_to_hosts_file(master_nodes, worker_nodes, opts, cluster_name, added_workers=None):
+	print('Updating /etc/hosts on all nodes...')
+	# different setup if we're resizing the cluster
+	if added_workers:
+		# add all nodes to just the new workers
+		all_nodes = master_nodes + worker_nodes + added_workers
+		all_ips = [n.ip_address for n in all_nodes]
+		all_names = [n.tags['Name'] for n in all_nodes]
+		all_hosts_string = '\n'.join(['{} {}'.format(i, n) for i, n in zip(all_ips, all_names)])
+		host_cmd = """sudo -- sh -c 'echo "{}" >> /etc/hosts'""".format(all_hosts_string)
+		for node in added_workers:
+			node_address = ec2utils.get_dns_name(node, opts.private_ips)
+			stdout, stderr = run_remote_cmd(node_address, opts, host_cmd)
+		# add the new node info to all previously existing nodes
+		prev_nodes = master_nodes + worker_nodes
+		new_ips = [n.ip_address for n in added_workers]
+		new_names = [n.tags['Name'] for n in added_workers]
+		new_hosts_string = '\n'.join(['{} {}'.format(i, n) for i, n in zip(new_ips, new_names)])
+		prev_host_cmd = """sudo -- sh -c 'echo "{}" >> /etc/hosts'""".format(new_hosts_string)
+		for node in prev_nodes:
+			node_address = ec2utils.get_dns_name(node, opts.private_ips)
+			stdout, stderr = run_remote_cmd(node_address, opts, prev_host_cmd)
+	else:
+		all_nodes = master_nodes + worker_nodes
+		ips = [str(n.ip_address) for n in all_nodes]
+		host_string = '\n'.join(['{} {}'.format(i, n) for i, n in zip(ips, node_names)])
+		host_cmd = """sudo -- sh -c 'echo "{}" >> /etc/hosts'""".format(host_string)
+		for node in all_nodes:
+			node_address = ec2utils.get_dns_name(node, opts.private_ips)
+			stdout, stderr = run_remote_cmd(node_address, opts, host_cmd)
+
+
+
+
+def _share_master_nfs_volume(master_nodes, worker_nodes, opts, cluster_name, cfg, resize=False):
+	print('Adding nodes to /etc/exports on master node...')
+	all_nodes = master_nodes + worker_nodes
+	master = master_nodes[0].ip_address
+	if resize:
+		node_names = [n.tags['Name'] for n in worker_nodes]
+	else:
+		node_names = [n.tags['Name'] for n in all_nodes]
+	for node in node_names:
+		export_cmd = """sudo -- sh -c 'echo "{} {}(async,no_root_squash,no_subtree_check,rw)" >> /etc/exports'""".format(
+			opts.master_ebs_raid_dir, node)
+		run_remote_cmd(master, opts, export_cmd)
+	nfs_start_cmd = 'sudo exportfs -a && sudo /etc/init.d/nfs-kernel-server start'
+	run_remote_cmd(master, opts, nfs_start_cmd)
+	print('Mounting NFS share ({}:{}) on each node:'.format(
+		master_nodes[0].tags['Name'], opts.master_ebs_raid_dir))
+	nfs_mount_cmd = "sudo mkdir {0}\
+	   && sudo mount {1}:{0} {0}\
+	   && sudo chmod 777 {0}".format(cfg['master_ebs_raid_dir'], master_nodes[0].tags['Name'])
+	progbar.distribute_ssh_keys_progbar(0, len(worker_nodes), '')
+	for i, worker in enumerate(worker_nodes):
+		worker_address = ec2utils.get_dns_name(worker)
+		run_remote_cmd(worker_address, opts, nfs_mount_cmd)
+		progbar.distribute_ssh_keys_progbar(i + 1, len(worker_nodes), worker.tags['Name'])
+	print()
 
 
 def build_ebs_raid_volume(master, master_nodes, worker_nodes, opts):

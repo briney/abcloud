@@ -189,6 +189,12 @@ def parse_args():
 		"--force-spot-master", default=False, action='store_true',
 		help="If specified, master will be launched as a spot instance " +
 			 "using --spot-price as maximum price.")
+	parser.add_option(
+		"--add-nodes", metavar="NODES", type="int",
+		help="Number of nodes to add to a resized cluster.")
+	parser.add_option(
+		"--remove-nodes", metavar="NODES", type="int",
+		help="Number of nodes to remove from a resized cluster.")
 	# parser.add_option(
 	# 	"--ganglia", action="store_true", default=True,
 	# 	help="Setup Ganglia monitoring on cluster (default: %default). NOTE: " +
@@ -401,6 +407,10 @@ def real_main():
 		else:
 			print("Cluster reboot has been aborted.")
 			sys.exit(1)
+
+	elif action == 'resize':
+		from utils.cluster import resize_cluster
+		resize_cluster(conn, opts, cluster_name)
 
 	elif action == "get-master":
 		# Get public IP address of the master node
