@@ -10,8 +10,14 @@ Usage
 Launch a basic cluster named 'test' with a master and 2 workers, all m3.large:  
 `./abcloud launch test --workers 2`  
   
-Launch a basic 'test' cluster with spot instance workers and a max price of $1.00/hr:  
+Launch a basic 'test' cluster with spot instance workers at a max price of $1.00/hr:  
 `./abcloud launch test --workers 2 --spot-price 1.00`  
+  
+Add two nodes to the 'test' cluster (reserved instances):  
+`./abcloud resize test --add-nodes 2`
+  
+Remove two nodes from the 'test' cluster (removes most recently added first)  
+`./abcloud resize test --remove-nodes 2`  
   
 SSH into the master instance of the 'test' cluster:  
 `./abcloud sshmaster test`
@@ -29,7 +35,10 @@ Terminate the 'test' cluster:
 `./abcloud destroy test`  
     
 Launch a single instance (r3.2xlarge) named 'jupyter' running a Jupyter server:  
-`./abcloud launch jupyter --master-instance-type r3.2xlarge --jupyter`
+`./abcloud launch jupyter --master-instance-type r3.2xlarge --jupyter`  
+  
+Launch 'jupyter' instance running a Jupyter server, but using spot pricing:  
+`./abcloud launch jupyter --jupyter --spot-price 2.00 --force-spot-master`  
   
 Launch a single instance named 'mongo' running MongoDB with 8x500GB EBS volumes in RAID10:  
 `./abcloud launch mongo --master-ebs-vol-num 8 --master-ebs-vol-size 500 --master-ebs-raid-level 10 --mongodb`  
