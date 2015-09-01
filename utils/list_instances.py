@@ -46,7 +46,7 @@ def print_groups_info(groups):
 
 def print_cluster_info(name, masters, workers, opts):
 	cname_string = '     {}     '.format(name)
-	cfg = _get_config(masters[0], opts)
+	cfg = get_config(masters[0], opts)
 	print('\n{}'.format(cname_string))
 	print('=' * len(cname_string))
 	region = masters[0].placement
@@ -98,7 +98,7 @@ def print_cluster_info(name, masters, workers, opts):
 	print('')
 
 
-def _get_config(master, opts):
+def get_config(master, opts):
 	get_config_cmd = 'cat /home/ubuntu/.abcloud_config'
 	cfg_string = run_remote_cmd(master.ip_address, opts, get_config_cmd)[0]
 	if cfg_string.strip():
