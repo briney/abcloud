@@ -121,9 +121,12 @@ def ssh_node(conn, opts, cluster_name, node_type='master'):
 		node = ec2utils.get_dns_name(instance, opts.private_ips)
 	print("Logging into node " + instance.tags['Name'] + "...")
 	proxy_opt = []
-	subprocess.check_call(
-		ssh_command(opts) + proxy_opt + ['-t', '-t', "%s@%s" % (opts.user, node)],
-		stderr=subprocess.PIPE)
+	try:
+		subprocess.check_call(
+			ssh_command(opts) + proxy_opt + ['-t', '-t', "%s@%s" % (opts.user, node)],
+			stderr=subprocess.PIPE)
+	except:
+		pass
 
 
 def reboot_workers(conn, opts, cluster_name):
@@ -459,9 +462,6 @@ def remove_nodes(conn, master_nodes, worker_nodes, opts, cluster_name):
 
 def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 	all_nodes = master_nodes + worker_nodes
-	# master_names = [n.tags['Name'] for n in master_nodes]
-	# worker_names = [n.tags['Name'] for n in worker_nodes]
-	# worker_ips = [ec2utils.get_ip_address(n) for n in worker_nodes]
 	node_names = [n.tags['Name'] for n in all_nodes]
 
 	# deploy SSH key to nodes for password-less SSH
@@ -521,7 +521,7 @@ def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 
 	write_config_info(master, opts)
 
-	print("\nDeploying files to master...")
+	# print("\nDeploying files to master...")
 	# deploy_files(
 	# 	conn=conn,
 	# 	root_dir=SPARK_EC2_DIR + "/" + "deploy.generic",
@@ -539,7 +539,7 @@ def setup_cluster(conn, master_nodes, worker_nodes, opts, deploy_ssh_key):
 	# 		master_nodes=master_nodes
 	# 	)
 
-	print("\nRunning setup on master...")
+	# print("\nRunning setup on master...")
 	# setup_spark_cluster(master, opts)
 	print("\nDone!\n\n")
 
@@ -1126,7 +1126,8 @@ def _launch_cluster(conn, opts, cluster_name):
 						if i in id_to_req and id_to_req[i].state == "active":
 							active_instance_ids.append(id_to_req[i].instance_id)
 					if len(active_instance_ids) == opts.workers:
-						print("All %d workers granted" % opts.workers)
+						progbar.distribute_ssh_keys_progbar(num_active, opts.workers, 'fulfilled')
+						print("\nAll %d workers granted" % opts.workers)
 						reservations = conn.get_all_reservations(active_instance_ids)
 						worker_nodes = []
 						for r in reservations:

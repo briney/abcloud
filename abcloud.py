@@ -377,11 +377,6 @@ def real_main():
 		from utils.cluster import destroy_cluster
 		destroy_cluster(conn, opts, cluster_name)
 
-	# elif action == "login":
-	# 	# Login (via SSH) to an existing cluster
-	# 	from utils.cluster import login
-	# 	login(conn, opts, cluster_name)
-
 	elif action == 'list':
 		from utils.list_instances import list_instances
 		list_instances(conn, opts)
