@@ -2,7 +2,7 @@
 
 EC2 instance/cluster management. Still under active development, so expect changes.
 
-## use
+### use
   
 `./abcloud <command> <cluster_name> [options]`  
   
@@ -49,7 +49,7 @@ To get a full list of options and default settings:
 `./abcloud --help`
 
 
-## requirements  
+### requirements  
   
 Python 2.7 (3.x probably doesn't work, but hasn't been tested)  
 boto  
