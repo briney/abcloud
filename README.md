@@ -53,6 +53,6 @@ To get a full list of options and default settings:
 Requirements
 -----------------
 
-Python 2.7 (not tested with 3.x)  
+Python 2.7 (3.x probably doesn't work, but hasn't been tested)  
 boto  
 paramiko  
