@@ -1,10 +1,9 @@
-AbCloud
-==============
+# AbCloud  
 
 EC2 instance/cluster management. Still under active development, so expect changes.
 
-Usage
---------  
+## use
+  
 `./abcloud <command> <cluster_name> [options]`  
   
 Launch a basic cluster named 'test' with a master and 2 workers, all m3.large:  
@@ -50,9 +49,10 @@ To get a full list of options and default settings:
 `./abcloud --help`
 
 
-Requirements
------------------
-
+## requirements  
+  
 Python 2.7 (3.x probably doesn't work, but hasn't been tested)  
 boto  
 paramiko  
+  
+All of the above dependencies can be installed with pip. If you're new to Python, a great way to get started is to install the Anaconda Python distribution (https://www.continuum.io/downloads), which includes pip as well as a ton of useful scientific Python packages.  
