@@ -843,7 +843,7 @@ def start_celery_workers(master, worker_nodes, opts):
 	print("\nStarting Celery worker processes on all worker nodes...")
 	master_cpus = int(run_remote_cmd(master, opts, 'nproc')[0].strip())
 	master_celery_processes = master_cpus - 4
-	celery_cmd = 'cd /abstar && /home/ubuntu/anaconda/bin/celery -A utils.queue.celery worker -l info --detach'
+	celery_cmd = '/home/ubuntu/anaconda/bin/celery -A abstar.utils.queue.celery worker -l info --detach'
 	if master_celery_processes > 0:
 		master_celery_cmd = celery_cmd + ' --concurrency={}'.format(master_celery_processes)
 		run_remote_cmd(master, opts, master_celery_cmd)
@@ -856,7 +856,7 @@ def start_celery_workers(master, worker_nodes, opts):
 
 def start_flower(master, opts):
 	print('\nStarting Flower server...')
-	flower_cmd = '''cd /abstar && screen -d -m bash -c "/home/ubuntu/anaconda/bin/flower -A utils.queue.celery"'''
+	flower_cmd = '''screen -d -m bash -c "/home/ubuntu/anaconda/bin/flower -A abstar.utils.queue.celery"'''
 	run_remote_cmd(master.ip_address, opts, flower_cmd)
 	print('Flower URL: http://{}:5555'.format(master.ip_address))
 

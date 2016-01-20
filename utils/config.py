@@ -24,7 +24,7 @@
 
 
 ABCLOUD_VERSION = "0.0.1"
-DEFAULT_ABTOOLS_VERSION = "0.4.0"
+DEFAULT_ABTOOLS_VERSION = "0.4.3"
 
 IDENTITY_FILE_PATH = '/Users/bryanbriney/Google_Drive/burton_lab/AWS/default.pem'
 MASTER_INSTANCE_TYPE = 'm3.large'
@@ -52,6 +52,8 @@ VALID_ABTOOLS_VERSIONS = set([
 	"0.3.5",
 	"0.3.6",
 	"0.4.0",
+	"0.4.2",
+	"0.4.3",
 ])
 
 ABTOOLS_AMI_MAP = {
@@ -75,6 +77,8 @@ ABTOOLS_AMI_MAP = {
 	"0.3.5": 'ami-5d299336',
 	"0.3.6": 'ami-d11aa0ba',
 	"0.4.0": 'ami-d03866ba',
+	"0.4.2": 'ami-7efdda14',
+	"0.4.3": 'ami-f7dbfc9d',
 }
 
 # Source: http://aws.amazon.com/amazon-linux-ami/instance-type-matrix/
