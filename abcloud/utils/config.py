@@ -32,6 +32,34 @@ WORKER_INSTANCE_TYPE = 'm3.large'
 
 DEPLOY_TO_ROOT = '/Users/bryanbriney/git/ab-blast'
 
+MASTER_TCP_PORT_RANGES = [(22, 22),  # SSH
+						  (111, 111),  # NFS
+						  (2049, 2049),  # NFS
+						  (4040, 4045),
+						  (4242, 4242),
+						  (5555, 5555),  # Celery
+						  (6379, 6379),  # Celery
+						  (8080, 8081),
+						  (8088, 8088),
+						  (8899, 8899),  # Jupyter
+						  (18080, 18080),
+						  (19999, 19999),
+						  (27017, 27017),  # MongoDB
+						  (50030, 50030),
+						  (50070, 50070),
+						  (60070, 60070), ]
+
+
+MASTER_UDP_PORT_RANGES = [(111, 111),  # NFS
+						  (2049, 2049),  # NFS
+						  (4242, 4242), ]
+
+
+WORKER_TCP_PORT_RANGES = [(22, 22),  # SSH
+						  (5555, 5555),  # Celery
+						  (6379, 6379),  # Celery
+						  (8080, 8081), ]
+
 VALID_ABTOOLS_VERSIONS = set([
 	"0.1.1",
 	"0.1.2",
@@ -139,4 +167,3 @@ EC2_INSTANCE_TYPES = {
 	"t2.small": "hvm",
 	"t2.medium": "hvm",
 }
-
