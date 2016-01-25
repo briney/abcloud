@@ -1,4 +1,6 @@
-#!/bin/sh
+#!/usr/bin/env python
+# filename: abcloud
+
 
 #
 # Copyright (c) 2015 Bryan Briney
@@ -20,8 +22,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-# Preserve the user's CWD so that relative paths are passed correctly to 
-# the underlying Python script.
-EC2_CLUSTER_DIR="$(dirname "$0")"
 
-python -Wdefault "${EC2_CLUSTER_DIR}/abcloud.py" "$@"
+from __future__ import print_function, unicode_literals
+
+import warnings
+
+import abcloud
+
+
+if __name__ == '__main__':
+	warnings.filterwarnings("ignore")
+	action, cluster_name, args = abcloud.parse_args()
+	abcloud.run_standalone(action, cluster_name, args)

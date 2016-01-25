@@ -27,8 +27,8 @@ import json
 import os
 import sys
 
-from utils import ec2utils
-from utils.cluster import run_remote_cmd
+# from utils import ec2utils
+# from utils.cluster import run_remote_cmd
 
 
 def list_instances(conn, opts):
