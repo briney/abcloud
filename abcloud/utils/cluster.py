@@ -161,10 +161,12 @@ class Cluster(object):
 			self.ec2,
 			self.name,
 			quiet=True)
+		masters = [m for m in masters if m.state['Name'] == 'running']
+		workers = [w for w in workers if w.state['Name'] == 'running']
 		if not masters:
 			return self
-		self.master_instance = [m for m in masters if m.state['Name'] == 'running'][0]
-		self.worker_instances = [w for w in workers if w.state['Name'] == 'running']
+		self.master_instance = masters[0]
+		self.worker_instances = workers
 		# self.opts = self.retrieve_opts(self.master_instance)
 		# get master instance information
 		self.master_name = [d['Value'] for d in self.master_instance.tags if 'Name' in d.values()][0]
@@ -255,7 +257,7 @@ class Cluster(object):
 				worker_response = ec2utils.request_spot_instance(
 					self.ec2c,
 					group_name=self.worker_group_name,
-					price=self.spot_price,
+					price=self.opts.spot_price,
 					ami=self.opts.ami,
 					num=self.opts.workers,
 					key_pair=self.opts.key_pair,
@@ -276,9 +278,9 @@ class Cluster(object):
 			master_response = ec2utils.request_spot_instance(
 				self.ec2c,
 				group_name=self.master_group_name,
-				price=self.spot_price,
+				price=self.opts.spot_price,
 				ami=self.opts.ami,
-				num=self.opts.workers,
+				num=1,
 				key_pair=self.opts.key_pair,
 				instance_type=self.opts.master_instance_type,
 				block_device_mappings=master_block_device_mappings)
@@ -304,10 +306,14 @@ class Cluster(object):
 			waiter = self.ec2c.get_waiter('spot_instance_request_fulfilled')
 			waiter.wait(SpotInstanceRequestIds=spot_request_ids)
 		if master_requests:
-			master_instance_ids = [r['InstanceId'] for r in master_requests]
+			master_requests = self.ec2c.describe_spot_instance_requests(
+				SpotInstanceRequestIds=[r['SpotInstanceRequestId'] for r in master_requests])
+			master_instance_ids = [r['InstanceId'] for r in master_requests['SpotInstanceRequests']]
 			self.master_instance = [self.ec2.Instance(id=i) for i in master_instance_ids][0]
 		if worker_requests:
-			worker_instance_ids = [r['InstanceId'] for r in worker_requests]
+			worker_requests = self.ec2c.describe_spot_instance_requests(
+				SpotInstanceRequestIds=[r['SpotInstanceRequestId'] for r in worker_requests])
+			worker_instance_ids = [r['InstanceId'] for r in worker_requests['SpotInstanceRequests']]
 			self.worker_instances = [self.ec2.Instance(id=i) for i in worker_instance_ids]
 
 		# wait for instances to state == 'running'
@@ -485,6 +491,30 @@ class Cluster(object):
 		subprocess.check_call(scp_cmd, stderr=subprocess.PIPE)
 
 
+	def tunnel(self, node_name, args):
+		print('')
+		print('Forwarding port {} to {}'.format(
+			args.port,
+			args.tunnel_server))
+		if node_name in ['master', self.master_name]:
+			instance = self.master_instance
+		elif node_name in self.worker_names:
+			instance = self.workers[node_name]
+		tunnel_cmd = 'ssh_tunnel -p {} -u {}'.format(
+			args.port,
+			args.tunnel_user)
+		tunnel_cmd += ' -r {}'.format(args.remote_server)
+		if args.tunnel_keyfile is not None:
+			tunnel_cmd += ' -k {}'.format(args.tunnel_keyfile)
+		else:
+			tunnel_cmd += ' --no-key'
+		if args.tunnel_password:
+			tunnel_cmd += ' -P {}'.format(args.tunnel_password)
+		tunnel_cmd += ' {}'.format(args.tunnel_server)
+		cmd = '''screen -d -m bash -c "{}"'''.format(tunnel_cmd)
+		self.run(instance, cmd)
+
+
 	def configure(self):
 		instances = [self.master_instance] + self.worker_instances
 		instance_lookup = dict(self.master, **self.workers)
@@ -549,6 +579,8 @@ class Cluster(object):
 		# configure and start a MongoDB server
 		if self.opts.mongodb:
 			self.setup_mongodb()
+		else:
+			self.stop_mongod()
 
 		# write config information to master
 		self.write_config_info()
@@ -736,6 +768,11 @@ class Cluster(object):
 		self.run(self.master_instance, mongod_start_cmd)
 		print('MongoDB database location: {}'.format(dbpath))
 		print('MongoDB log location: /log/mongod.log')
+
+
+	def stop_mongod(self):
+		mongod_stop_cmd = 'sudo service mongod stop'
+		self.run(self.master_instance, mongod_stop_cmd)
 
 
 	def write_config_info(self):
