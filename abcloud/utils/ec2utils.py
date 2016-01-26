@@ -117,8 +117,8 @@ def request_spot_instance(ec2c, group_name=None, price=None, num=1, ami=None,
 	if block_device_mappings:
 		launch_spec['BlockDeviceMappings'] = block_device_mappings
 	# request spot instances
-	response = ec2c.request_spot_instance(
-		SpotPrice=price,
+	response = ec2c.request_spot_instances(
+		SpotPrice=str(price),
 		InstanceCount=num,
 		Type='one-time',
 		LaunchSpecification=launch_spec)

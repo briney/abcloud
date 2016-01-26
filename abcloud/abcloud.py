@@ -28,6 +28,7 @@ from __future__ import division, print_function, with_statement
 import argparse
 import codecs
 from datetime import datetime
+import getpass
 import hashlib
 import itertools
 import logging
@@ -161,43 +162,46 @@ def parse_args(print_help=False):
 	# parser.add_argument(
 	# 	"--remove-nodes", metavar="NODES", type="int",
 	# 	help="Number of nodes to remove from a resized cluster.")
-	parser.add_argument(
-		"--no-celery", action="store_false", dest="celery", default=True,
+	parser.add_argument("--no-celery", action="store_false", dest="celery", default=True,
 		help="Disable Celery configuration on the cluster.")
-	parser.add_argument(
-		"--no-basespace-credentials", action="store_false", dest="basespace_credentials", default=True,
+	parser.add_argument("--no-basespace-credentials", action="store_false", dest="basespace_credentials", default=True,
 		help="If set, BaseSpace credentials file will NOT be uploaded to the server/cluster.")
-	parser.add_argument(
-		"-u", "--user", default="ubuntu",
+	parser.add_argument("-u", "--user", default="ubuntu",
 		help="The SSH user you want to connect as (default: %default)")
-	parser.add_argument(
-		"--delete-groups", action="store_true", default=False,
+	parser.add_argument("--delete-groups", action="store_true", default=False,
 		help="When destroying a cluster, delete the security groups that were created")
-	parser.add_argument(
-		"--use-existing-master", action="store_true", default=False,
+	parser.add_argument("--use-existing-master", action="store_true", default=False,
 		help="Launch fresh workers, but use an existing stopped master if possible")
-	parser.add_argument(
-		"--jupyter", action="store_true", default=False,
+	parser.add_argument("--jupyter", action="store_true", default=False,
 		help="Set up a persistent Jupyter notebook server on the master node. \
-			 Jupyter notebook server will be launched in <master-ebs-raid-dir>/jupyter if \
-			 EBS volumes are attached, or in /home/ubuntu/jupyter if not. \
-			 If set without --jupyter-password, default password is 'abcloud'.")
-	# parser.add_argument(
-	# 	"--jupyter-port", default=8899, type=int,
-	# 	help="Port for the Jupyter server. Ignored if '-jupyter' is not also set.")
-	parser.add_argument(
-		"--jupyter-password", default='abcloud',
+		Jupyter notebook server will be launched in <master-ebs-raid-dir>/jupyter if \
+		EBS volumes are attached, or in /home/ubuntu/jupyter if not. \
+		If set without --jupyter-password, default password is 'abcloud'.")
+	parser.add_argument("--jupyter-password", default='abcloud',
 		help="Password for the Jupyter server. Ignored if '-jupyter' is not also set.")
-	parser.add_argument(
-		"--mongodb", action="store_true", default=False,
-		help="Set up a MongoDB server on the master instance. Database will be located at <master-ebs-raid-dir>/db. \
+	parser.add_argument("--mongodb", action="store_true", default=False,
+		help="Set up a MongoDB server on the master instance. \
+		Database will be located at <master-ebs-raid-dir>/db. \
 		At the current time, auth is not enabled when launching mongod.")
-	parser.add_argument(
-		"--localpath", default=None,
+	parser.add_argument("--localpath", default=None,
 		help="Local path for put/get operations")
-	parser.add_argument(
-		"--remotepath", default=None,
+	parser.add_argument("--remotepath", default=None,
 		help="Remote path for put/get operations")
+	parser.add_argument('--port', dest='port', default=None,
+		help='Port to forward to a remote server. \
+		Default is None, which results in no port forwarding')
+	parser.add_argument('--tunnel-server', dest='tunnel_server', default=None,
+		help='SSH server to which the port will be forwarded, as <server_hostname>[:<server_port>]. \
+		If a server_port is not provided, the port provided by "--forward-port" will be used.')
+	parser.add_argument('--remote-server', dest='remote_server', default='localhost',
+		help='Remote server for port forwarding. \
+		Default is "localhost", which results in the port being forwarded to --forward-port-server.')
+	parser.add_argument('--tunnel-user', dest='tunnel_user', default=None,
+		help='SSH user for port forwarding')
+	parser.add_argument('--tunnel-password', dest='tunnel_password', default=False, action='store_true',
+		help='If set, will request a SSH password for port forwarding.')
+	parser.add_argument('--tunnel-keyfile', dest='tunnel_keyfile', default=None,
+		help='SSH keyfile for port forwarding. Default is None.')
 	# parser.add_argument(
 	# 	"--user-data", type="string", default="",
 	# 	help="Path to a user-data file (most AMIs interpret this as an initialization script)")
@@ -390,7 +394,7 @@ def main(action, cluster_name, args):
 		clust.ssh(node_name=args.node)
 
 	elif action == 'put':
-		node = args.node if node is not None else 'master'
+		node = args.node if args.node is not None else 'master'
 		clust = cluster.retrieve_cluster(cluster_name, args)
 		clust.put(node, args.localpath, args.remotepath)
 
@@ -398,6 +402,13 @@ def main(action, cluster_name, args):
 		node = args.node if node is not None else 'master'
 		clust = cluster.retrieve_cluster(cluster_name, args)
 		clust.get(node, args.remotepath, args.localpath)
+
+	elif action == 'tunnel':
+		if args.tunnel_password:
+			args.tunnel_password = getpass.getpass('Enter SSH password: ')
+		node = args.node if args.node is not None else 'master'
+		clust = cluster.retrieve_cluster(cluster_name, args)
+		clust.tunnel(node, args)
 
 	else:
 		print("Invalid action: {}".format(action), file=stderr)
