@@ -31,6 +31,6 @@ import abcloud
 
 
 if __name__ == '__main__':
-	warnings.filterwarnings("ignore")
-	action, cluster_name, args = abcloud.parse_args()
-	abcloud.run_standalone(action, cluster_name, args)
+    warnings.filterwarnings("ignore")
+    action, cluster_name, args = abcloud.parse_args()
+    abcloud.run_standalone(action, cluster_name, args)
