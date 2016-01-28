@@ -64,3 +64,7 @@ target/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# SublimeText
+*sublime-project
+*sublime-workspace
