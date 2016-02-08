@@ -71,12 +71,12 @@ def parse_args(print_help=False):
         "-i", "--identity-file", default=IDENTITY_FILE_PATH,
         help="SSH private key file to use for logging into instances (default: %default)")
     parser.add_argument(
-        "-t", "--instance-type", default=WORKER_INSTANCE_TYPE,
+        "-t", "--instance-type", default=INSTANCE_TYPE,
         help="Type of worker node instances to launch (default: %default). \
              WARNING: must be 64-bit; small instances won't work")
     parser.add_argument(
-        "-m", "--master-instance-type", default=MASTER_INSTANCE_TYPE,
-        help="Master instance type (leave empty for same as instance-type)")
+        "-m", "--master-instance-type", default=None,
+        help="Master instance type (leave empty for same as --instance-type)")
     parser.add_argument(
         "--node", default=None,
         help="Node to SSH into (use with sshmaster or sshnode actions) or for put/get operations.")
@@ -249,7 +249,7 @@ class Args(object):
     """docstring for Args"""
     def __init__(self, action, cluster_name=None, path1=None, path2=None, localpath=None,
         remotepath=None, workers=0, key_pair='default', identity_file=IDENTITY_FILE_PATH,
-        instance_type=WORKER_INSTANCE_TYPE, master_instance_type=MASTER_INSTANCE_TYPE,
+        instance_type=INSTANCE_TYPE, master_instance_type=None,
         node=None, region='us-east-1', zone=None, ami=None, abtools_version=DEFAULT_ABTOOLS_VERSION,
         deploy_root_dir=False, resume=False, master_ebs_vol_size=25, master_ebs_vol_num=4,
         master_ebs_raid_level=0, master_ebs_raid_dir='\data',
@@ -268,7 +268,7 @@ class Args(object):
         self.key_pair = key_pair
         self.identity_file = identity_file
         self.instance_type = instance_type
-        self.master_instance_type = master_instance_type
+        self.master_instance_type = master_instance_type if master_instance_type is not None else instance_type
         self.node = node
         self.region = region
         self.zone = zone
@@ -399,7 +399,7 @@ def main(action, cluster_name, args):
         clust.put(node, args.localpath, args.remotepath)
 
     elif action == 'get':
-        node = args.node if node is not None else 'master'
+        node = args.node if args.node is not None else 'master'
         clust = cluster.retrieve_cluster(cluster_name, args)
         clust.get(node, args.remotepath, args.localpath)
 

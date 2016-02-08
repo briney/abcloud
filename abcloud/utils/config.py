@@ -24,13 +24,13 @@
 
 
 ABCLOUD_VERSION = "0.0.1"
-DEFAULT_ABTOOLS_VERSION = "0.4.5"
+DEFAULT_ABTOOLS_VERSION = "0.4.7"
 
 IDENTITY_FILE_PATH = '/Users/bryanbriney/Google_Drive/burton_lab/AWS/default.pem'
-MASTER_INSTANCE_TYPE = 'm3.large'
-WORKER_INSTANCE_TYPE = 'm3.large'
 
-DEPLOY_TO_ROOT = '/Users/bryanbriney/git/ab-blast'
+INSTANCE_TYPE = 'm3.large'
+
+DEPLOY_TO_ROOT = ''
 
 MASTER_TCP_PORT_RANGES = [(22, 22),  # SSH
                           (111, 111),  # NFS
@@ -84,6 +84,8 @@ VALID_ABTOOLS_VERSIONS = set([
     "0.4.3",
     "0.4.4",
     "0.4.5",
+    "0.4.6",
+    "0.4.7",
 ])
 
 ABTOOLS_AMI_MAP = {
@@ -111,6 +113,8 @@ ABTOOLS_AMI_MAP = {
     "0.4.3": 'ami-f7dbfc9d',
     "0.4.4": 'ami-981e3df2',
     "0.4.5": 'ami-f5eecd9f',
+    "0.4.6": 'ami-fa725f90',
+    "0.4.7": 'ami-8583adef'
 }
 
 # Source: http://aws.amazon.com/amazon-linux-ami/instance-type-matrix/
