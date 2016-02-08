@@ -1,6 +1,6 @@
 # AbCloud  
 
-EC2 instance/cluster management. Still under active development, so expect changes.
+EC2 instance/cluster management. Still under active development, but main commands (launch, sshmaster/sshnode, destroy, terminate) are stable and should not change..
 
 ### use
   
