@@ -238,6 +238,7 @@ class Cluster(object):
                           'Ebs': ebs}
             master_block_device_mappings.append(device_map)
         # ephemeral drives must be added to the BlockDeviceMappings for m3 instances
+        # see: http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/block-device-mapping-concepts.html
         if self.opts.master_instance_type is None:
             self.opts.master_instance_type = self.opts.instance_type
         if self.opts.master_instance_type.split('.')[0] in ['m3', ]:
@@ -253,7 +254,8 @@ class Cluster(object):
         if self.opts.workers > 0:
             if self.opts.spot_price:
                 print('')
-                print('Requesting')
+                print('Requesting {0} spot instance{1} for worker node{1}...'.format(
+                    self.opts.workers, '' if self.opts.workers == 1 else 's'))
                 worker_response = ec2utils.request_spot_instance(
                     self.ec2c,
                     group_name=self.worker_group_name,
@@ -275,6 +277,7 @@ class Cluster(object):
 
         # launch masters
         if all([self.opts.force_spot_master, self.opts.spot_price is not None]):
+            print('Requesting a spot instance for master node...')
             master_response = ec2utils.request_spot_instance(
                 self.ec2c,
                 group_name=self.master_group_name,
@@ -300,6 +303,8 @@ class Cluster(object):
         worker_requests = worker_response['SpotInstanceRequests']
         spot_requests = master_requests + worker_requests
         if spot_requests:
+            # wait for AWS to populate the list of spot instance requests
+            time.sleep(10)
             print('')
             print('Waiting for spot requests to be fulfulled...')
             spot_request_ids = [r['SpotInstanceRequestId'] for r in spot_requests]
