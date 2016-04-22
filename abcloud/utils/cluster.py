@@ -270,6 +270,7 @@ class Cluster(object):
                     ImageId=self.opts.ami,
                     MinCount=self.opts.workers,
                     MaxCount=self.opts.workers,
+                    KeyName=self.opts.key_pair,
                     InstanceType=self.opts.instance_type,
                     SecurityGroups=[self.worker_group_name])
         else:
@@ -293,6 +294,7 @@ class Cluster(object):
                 ImageId=self.opts.ami,
                 MinCount=1,
                 MaxCount=1,
+                KeyName=self.opts.key_pair,
                 InstanceType=self.opts.master_instance_type,
                 SecurityGroups=[self.master_group_name],
                 BlockDeviceMappings=master_block_device_mappings)
@@ -393,8 +395,9 @@ class Cluster(object):
         msg = 'Are you sure you want to terminate this cluster? (y/N) '
         response = raw_input(msg)
         if response.upper() == 'Y':
-            instances = [instance for name, instance in all_instances]
-            self.terminate_instances(self.ec2c, instances)
+            if any(all_instances):
+                instances = [instance for name, instance in all_instances]
+                self.terminate_instances(self.ec2c, instances)
 
     @staticmethod
     def terminate_instances(ec2c, instances):
@@ -695,14 +698,16 @@ class Cluster(object):
 
 
     def start_redis_server(self, instance):
-        redis_cmd = 'redis-server'
+        redis_cmd = 'sudo rm /etc/redis/6379.conf'
+        redis_cmd += " && echo 'daemonize yes' | sudo tee -a /etc/redis/6379.conf"
+        redis_cmd += ' && /home/ubuntu/anaconda2/bin/redis-server /etc/redis/6379.conf'
         self.run(instance, redis_cmd)
 
 
     def start_celery_workers(self, instances):
         print('')
         print('Starting Celery worker processes:')
-        celery_cmd = '/home/ubuntu/anaconda/bin/celery '
+        celery_cmd = '/home/ubuntu/anaconda2/bin/celery '
         celery_cmd += '-A abstar.utils.queue.celery worker -l info --detach'
         progbar.progress_bar(0, len(instances))
         for i, instance in enumerate(instances):
@@ -714,7 +719,7 @@ class Cluster(object):
     def start_flower(self):
         print('')
         print('Starting Flower server on master...')
-        flower_cmd = '''screen -d -m bash -c "/home/ubuntu/anaconda/bin/flower -A abstar.utils.queue.celery"'''
+        flower_cmd = '''screen -d -m bash -c "/home/ubuntu/anaconda2/bin/flower -A abstar.utils.queue.celery"'''
         self.run(self.master_instance, flower_cmd)
         print('Flower URL: http://{}:5555'.format(self.master_instance.public_ip_address))
 
@@ -724,12 +729,13 @@ class Cluster(object):
         print('Launching a Jupyter Notebook server on {}...'.format(
             self.master_name))
         # hash/salt the Jupyter login password
-        sha1_py = 'from IPython.lib import passwd; print passwd("{}")'.format(
+        sha1_py = 'from notebook.auth import passwd; print passwd("{}")'.format(
             self.opts.jupyter_password)
-        sha1_cmd = "/home/ubuntu/anaconda/bin/python -c '{}'".format(sha1_py)
+        sha1_cmd = "/home/ubuntu/anaconda2/bin/python -c '{}'".format(sha1_py)
         passwd = self.run(self.master_instance, sha1_cmd)[0].strip()
         # make a new Jupyter profile and directory; edit the config
-        create_profile_cmd = '/home/ubuntu/anaconda/bin/ipython profile create'
+        # create_profile_cmd = '/home/ubuntu/anaconda2/bin/ipython profile create'
+        create_profile_cmd = '/home/ubuntu/anaconda2/bin/jupyter notebook --generate-config'
         self.run(self.master_instance, create_profile_cmd)
         if self.opts.master_ebs_vol_num > 0:
             notebook_dir = os.path.join(self.opts.master_ebs_raid_dir, 'jupyter')
@@ -738,17 +744,18 @@ class Cluster(object):
         mkdir_cmd = 'sudo mkdir {0} && sudo chmod 777 {0}'.format(notebook_dir)
         self.run(self.master_instance, mkdir_cmd)
         profile_config_string = '\n'.join([
-            "c = get_config()",
-            "c.IPKernelApp.pylab = 'inline'",
+            # "c = get_config()", # already built-in to the pre-configured Jupyter config
+            # "c.IPKernelApp.pylab = 'inline'", # Jupyter doesn't support pre-configuring %pylab inline
             "c.NotebookApp.ip = '*'",
             "c.NotebookApp.open_browser = False",
             "c.NotebookApp.password = u'%s'" % passwd,
             "c.NotebookApp.port = 8899"])
         profile_config_cmd = 'echo "{}" '.format(profile_config_string)
-        profile_config_cmd += '| sudo tee /home/ubuntu/.ipython/profile_default/ipython_notebook_config.py'
+        # profile_config_cmd += '| sudo tee /home/ubuntu/.ipython/profile_default/ipython_notebook_config.py'
+        profile_config_cmd += '| sudo tee /home/ubuntu/.jupyter/jupyter_notebook_config.py'
         self.run(self.master_instance, profile_config_cmd)
         # start a backgroud Jupyter instance
-        jupyter_start_cmd = "/home/ubuntu/anaconda/bin/ipython notebook --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
+        jupyter_start_cmd = "/home/ubuntu/anaconda2/bin/jupyter notebook --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
         self.run(self.master_instance, jupyter_start_cmd)
         print("Jupyter notebook URL: http://{}:{}".format(self.master_instance.public_ip_address, 8899))
         print("Password for the Jupyter notebook is '{}'".format(self.opts.jupyter_password))
@@ -823,3 +830,88 @@ def retrieve_cluster(cluster_name, opts):
     c = Cluster(cluster_name, opts=opts)
     c.load()
     return c
+
+
+def list_clusters(opts):
+    ec2 = boto3.resource('ec2')
+    groups = ec2.security_groups.all()
+    abcloud_groups = sorted(list(set(['-'.join(g.group_name.split('-')[1:-1]) for g in groups if g.group_name.startswith('@abcloud')])))
+    print_groups_info(abcloud_groups)
+    for ag in abcloud_groups:
+        c = retrieve_cluster(ag, opts)
+        print_cluster_info(ag, c)
+
+
+def print_groups_info(groups):
+    print('\nFound {} AbCloud clusters:\n{}\n'.format(len(groups), ', '.join(groups)))
+
+
+def print_cluster_info(name, cluster):
+    cname_string = '     {}     '.format(name)
+    # cfg = get_config(masters[0], opts)
+    print('\n{}'.format(cname_string))
+    print('=' * len(cname_string))
+    if len(cluster.master) + len(cluster.workers) == 0:
+        print('No instances found.')
+    else:
+        mcount = 1 if cluster.master_instance is not None else 0
+        wcount = len(cluster.worker_instances)
+        mtype = cluster.master_instance.instance_type if cluster.master_instance is not None else 'None'
+        mip = cluster.master_instance.public_ip_address if cluster.master_instance is not None else 'None'
+        print('size: {}'.format(mcount + wcount))
+        print('')
+        print('number of master instances: {}'.format(mcount))
+        print('master instance type: {}'.format(mtype))
+        print('master instance IP address: {}'.format(mip))
+
+        if cluster.workers:
+            wtype = cluster.worker_instances[0].instance_type
+            wips = ', '.join([w.public_ip_address for w in cluster.worker_instances])
+            wplural = 'es' if wcount > 1 else ''
+            print('')
+            print('number of worker instances: {}'.format(wcount))
+            print('worker instance type: {}'.format(wtype))
+            # print('worker instance IP address{}: {}'.format(wplural, wips))
+        if cluster.opts.basespace_credentials:
+            print('\nBaseSpace credentials have been uploaded')
+        elif check_for_basespace_credentials(cluster):
+            print('\nBaseSpace credentials have been uploaded')
+        if cluster.opts.mongodb:
+            print('\nMaster node is configured as a MongoDB server.')
+            print('MongoDB database is located at: {}'.format(os.path.join(cluster.opts.master_ebs_raid_dir, 'db')))
+        if cluster.opts.jupyter:
+            jupyter_location = 'http://{}:8899'.format(cluster.master_instance.public_ip_address)
+            print('\nMaster node is configured as a Jupyter notebook server.')
+            print("Jupyter notebook URL: {}".format(jupyter_location))
+            print('Jupyter password: {}'.format(cluster.opts.jupyter_password))
+        if cluster.opts.celery and cluster.workers:
+            total, running = get_celery_info(cluster)
+            print('\nCluster is configured to use Celery.')
+            print('Number of Celery workers: {}'.format(total))
+            print("Workers reporting 'OK' status: {}".format(running))
+            print('Flower is available at: http://{}:5555'.format(cluster.master_instance.public_ip_address))
+    print('')
+
+
+def check_for_basespace_credentials(cluster):
+    cred_dir = '/home/{}/.abstar/'.format(cluster.opts.user)
+    cred_cmd = 'ls %s' % cred_dir
+    stdout, stderr = cluster.run(cluster.master_instance, cred_cmd)
+    if 'basespace_credentials' in stdout:
+        return True
+    return False
+
+
+def get_celery_info(cluster):
+    celery_info_cmd = '/home/ubuntu/anaconda/bin/celery -A abstar.utils.queue.celery status'
+    info = cluster.run(cluster.master_instance, celery_info_cmd)[0]
+    total = 0
+    running = 0
+    for inst in info.split('\n'):
+        if 'celery@' in inst:
+            total += 1
+        else:
+            continue
+        if 'OK' in inst:
+            running += 1
+    return total, running

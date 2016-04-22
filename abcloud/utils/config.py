@@ -23,10 +23,13 @@
 #
 
 
-ABCLOUD_VERSION = "0.0.1"
-DEFAULT_ABTOOLS_VERSION = "0.4.7"
+import os
 
-IDENTITY_FILE_PATH = '/Users/bryanbriney/Google_Drive/burton_lab/AWS/default.pem'
+
+ABCLOUD_VERSION = "0.0.1"
+DEFAULT_ABTOOLS_VERSION = "0.5.5"
+
+IDENTITY_FILE_PATH = os.path.expanduser('~/.aws/default.pem')
 
 INSTANCE_TYPE = 'm3.large'
 
@@ -86,6 +89,15 @@ VALID_ABTOOLS_VERSIONS = set([
     "0.4.5",
     "0.4.6",
     "0.4.7",
+    "0.4.8",
+    "0.4.9",
+    "0.4.10",
+    '0.5.0',
+    '0.5.1',
+    '0.5.2',
+    '0.5.3',
+    '0.5.4',
+    '0.5.5'
 ])
 
 ABTOOLS_AMI_MAP = {
@@ -114,7 +126,16 @@ ABTOOLS_AMI_MAP = {
     "0.4.4": 'ami-981e3df2',
     "0.4.5": 'ami-f5eecd9f',
     "0.4.6": 'ami-fa725f90',
-    "0.4.7": 'ami-8583adef'
+    "0.4.7": 'ami-8583adef',
+    "0.4.8": 'ami-f0162a9a',
+    "0.4.9": 'ami-f5dee29f',
+    "0.4.10": 'ami-78d0ec12',
+    "0.5.0": 'ami-17e7ea7d',
+    "0.5.1": 'ami-852728ef',
+    "0.5.2": 'ami-3b8f8051',
+    "0.5.3": 'ami-50858a3a',
+    "0.5.4": 'ami-4628352c',
+    "0.5.5": 'ami-99f3eef3'
 }
 
 # Source: http://aws.amazon.com/amazon-linux-ami/instance-type-matrix/
