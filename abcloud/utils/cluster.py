@@ -698,14 +698,16 @@ class Cluster(object):
 
 
     def start_redis_server(self, instance):
-        redis_cmd = 'redis-server'
+        redis_cmd = 'sudo rm /etc/redis/6379.conf'
+        redis_cmd += " && echo 'daemonize yes' | sudo tee -a /etc/redis/6379.conf"
+        redis_cmd += ' && /home/ubuntu/anaconda2/bin/redis-server /etc/redis/6379.conf'
         self.run(instance, redis_cmd)
 
 
     def start_celery_workers(self, instances):
         print('')
         print('Starting Celery worker processes:')
-        celery_cmd = '/home/ubuntu/anaconda/bin/celery '
+        celery_cmd = '/home/ubuntu/anaconda2/bin/celery '
         celery_cmd += '-A abstar.utils.queue.celery worker -l info --detach'
         progbar.progress_bar(0, len(instances))
         for i, instance in enumerate(instances):
@@ -717,7 +719,7 @@ class Cluster(object):
     def start_flower(self):
         print('')
         print('Starting Flower server on master...')
-        flower_cmd = '''screen -d -m bash -c "/home/ubuntu/anaconda/bin/flower -A abstar.utils.queue.celery"'''
+        flower_cmd = '''screen -d -m bash -c "/home/ubuntu/anaconda2/bin/flower -A abstar.utils.queue.celery"'''
         self.run(self.master_instance, flower_cmd)
         print('Flower URL: http://{}:5555'.format(self.master_instance.public_ip_address))
 
