@@ -399,8 +399,9 @@ class Cluster(object):
         msg = 'Are you sure you want to terminate this cluster? (y/N) '
         response = raw_input(msg)
         if response.upper() == 'Y':
-            instances = [instance for name, instance in all_instances]
-            self.terminate_instances(self.ec2c, instances)
+            if any(all_instances):
+                instances = [instance for name, instance in all_instances]
+                self.terminate_instances(self.ec2c, instances)
 
     @staticmethod
     def terminate_instances(ec2c, instances):
@@ -786,12 +787,13 @@ class Cluster(object):
         print('Launching a Jupyter Notebook server on {}...'.format(
             self.master_name))
         # hash/salt the Jupyter login password
-        sha1_py = 'from IPython.lib import passwd; print passwd("{}")'.format(
+        sha1_py = 'from notebook.auth import passwd; print passwd("{}")'.format(
             self.opts.jupyter_password)
         sha1_cmd = "/home/ubuntu/anaconda2/bin/python -c '{}'".format(sha1_py)
         passwd = self.run(self.master_instance, sha1_cmd)[0].strip()
         # make a new Jupyter profile and directory; edit the config
-        create_profile_cmd = '/home/ubuntu/anaconda2/bin/ipython profile create'
+        # create_profile_cmd = '/home/ubuntu/anaconda2/bin/ipython profile create'
+        create_profile_cmd = '/home/ubuntu/anaconda2/bin/jupyter notebook --generate-config'
         self.run(self.master_instance, create_profile_cmd)
         if self.opts.master_ebs_vol_num > 0:
             notebook_dir = os.path.join(self.opts.master_ebs_raid_dir, 'jupyter')
@@ -800,17 +802,18 @@ class Cluster(object):
         mkdir_cmd = 'sudo mkdir {0} && sudo chmod 777 {0}'.format(notebook_dir)
         self.run(self.master_instance, mkdir_cmd)
         profile_config_string = '\n'.join([
-            "c = get_config()",
-            "c.IPKernelApp.pylab = 'inline'",
+            # "c = get_config()", # already built-in to the pre-configured Jupyter config
+            # "c.IPKernelApp.pylab = 'inline'", # Jupyter doesn't support pre-configuring %pylab inline
             "c.NotebookApp.ip = '*'",
             "c.NotebookApp.open_browser = False",
             "c.NotebookApp.password = u'%s'" % passwd,
             "c.NotebookApp.port = 8899"])
         profile_config_cmd = 'echo "{}" '.format(profile_config_string)
-        profile_config_cmd += '| sudo tee /home/ubuntu/.ipython/profile_default/ipython_notebook_config.py'
+        # profile_config_cmd += '| sudo tee /home/ubuntu/.ipython/profile_default/ipython_notebook_config.py'
+        profile_config_cmd += '| sudo tee /home/ubuntu/.jupyter/jupyter_notebook_config.py'
         self.run(self.master_instance, profile_config_cmd)
         # start a backgroud Jupyter instance
-        jupyter_start_cmd = "/home/ubuntu/anaconda2/bin/ipython notebook --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
+        jupyter_start_cmd = "/home/ubuntu/anaconda2/bin/jupyter notebook --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
         self.run(self.master_instance, jupyter_start_cmd)
         print("Jupyter notebook URL: http://{}:{}".format(self.master_instance.public_ip_address, 8899))
         print("Password for the Jupyter notebook is '{}'".format(self.opts.jupyter_password))
@@ -1029,9 +1032,6 @@ def retrieve_cluster(cluster_name, opts):
     c = Cluster(cluster_name, opts=opts)
     c.load()
     return c
-
-
-
 
 
 def list_clusters(opts):

@@ -23,10 +23,13 @@
 #
 
 
-ABCLOUD_VERSION = "0.0.1"
-# DEFAULT_ABTOOLS_VERSION = "0.4.7"
+import os
 
-IDENTITY_FILE_PATH = '/Users/bryanbriney/Google_Drive/burton_lab/AWS/default.pem'
+
+ABCLOUD_VERSION = "0.0.1"
+DEFAULT_ABTOOLS_VERSION = "0.5.5"
+
+IDENTITY_FILE_PATH = os.path.expanduser('~/.aws/default.pem')
 
 INSTANCE_TYPE = 'm3.large'
 

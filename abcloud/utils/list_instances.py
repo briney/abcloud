@@ -27,17 +27,28 @@ import json
 import os
 import sys
 
+import boto3
+
 # from utils import ec2utils
 # from utils.cluster import run_remote_cmd
 
 
 def list_instances(conn, opts):
-    all_groups = conn.get_all_security_groups()
-    abcloud_groups = sorted(list(set(['-'.join(g.name.split('-')[1:-1]) for g in all_groups if g.name.startswith('@abcloud')])))
+    ec2 = boto3.resource('ec2')
+    groups = ec2.security_groups.all()
+    abcloud_groups = sorted(list(set(['-'.join(g.name.split('-')[1:-1]) for g in groups if g.name.startswith('@abcloud')])))
     print_groups_info(abcloud_groups)
     for ag in abcloud_groups:
-        master_instances, worker_instances = ec2utils.get_existing_cluster(conn, opts, ag, quiet=True)
+        master_instances = ec2utils.get_instances(ec2, '@abcloud-' + ag + '-master')
+        worker_instances = ec2utils.get_instances(ec2, '@abcloud-' + ag + '-worker')
         print_cluster_info(ag, master_instances, worker_instances, opts)
+
+    # all_groups = conn.get_all_security_groups()
+    # abcloud_groups = sorted(list(set(['-'.join(g.name.split('-')[1:-1]) for g in all_groups if g.name.startswith('@abcloud')])))
+    # print_groups_info(abcloud_groups)
+    # for ag in abcloud_groups:
+    #     master_instances, worker_instances = ec2utils.get_existing_cluster(conn, opts, ag, quiet=True)
+    #     print_cluster_info(ag, master_instances, worker_instances, opts)
 
 
 def print_groups_info(groups):
