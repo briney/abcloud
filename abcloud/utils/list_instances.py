@@ -108,7 +108,7 @@ def get_config(master, opts):
 
 
 def get_celery_info(master, opts):
-    celery_info_cmd = 'cd /abstar && /home/ubuntu/anaconda/bin/celery -A utils.queue.celery status'
+    celery_info_cmd = 'cd /abstar && /home/ubuntu/anaconda2/bin/celery -A utils.queue.celery status'
     info = run_remote_cmd(master.ip_address, opts, celery_info_cmd)[0]
     total = 0
     running = 0

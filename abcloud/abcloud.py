@@ -50,7 +50,7 @@ import warnings
 
 import boto3
 
-from utils import cluster
+from utils import cluster, list_instances
 from utils.config import *
 
 
@@ -91,9 +91,9 @@ def parse_args(print_help=False):
     parser.add_argument(
         "-a", "--ami", default=None,
         help="Amazon Machine Image ID to use (default: %default)")
-    parser.add_argument(
-        "--abtools-version", default=DEFAULT_ABTOOLS_VERSION,
-        help="Version of AbTools to use: 'X.Y.Z' (default: %default)")
+    # parser.add_argument(
+    #     "--abtools-version", default=DEFAULT_ABTOOLS_VERSION,
+    #     help="Version of AbTools to use: 'X.Y.Z' (default: %default)")
     parser.add_argument('-l', '--log', dest='logfile', default=None,
         help='Path to logfile location. If not supplied, log will not be generated.')
     parser.add_argument(
@@ -250,7 +250,7 @@ class Args(object):
     def __init__(self, action, cluster_name=None, path1=None, path2=None, localpath=None,
         remotepath=None, workers=0, key_pair='default', identity_file=IDENTITY_FILE_PATH,
         instance_type=INSTANCE_TYPE, master_instance_type=None,
-        node=None, region='us-east-1', zone=None, ami=None, abtools_version=DEFAULT_ABTOOLS_VERSION,
+        node=None, region='us-east-1', zone=None, ami=None,
         deploy_root_dir=False, resume=False, master_ebs_vol_size=25, master_ebs_vol_num=4,
         master_ebs_raid_level=0, master_ebs_raid_dir='\data',
         ebs_vol_size=0, ebs_vol_type='standard', ebs_vol_num=1,
@@ -273,7 +273,6 @@ class Args(object):
         self.region = region
         self.zone = zone
         self.ami = ami
-        self.abtools_version = abtools_version
         self.deploy_root_dir = deploy_root_dir
         self.resume = resume
         self.master_ebs_vol_size = master_ebs_vol_size
