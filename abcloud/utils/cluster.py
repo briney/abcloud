@@ -28,6 +28,7 @@ from __future__ import print_function
 import cPickle as pickle
 from datetime import datetime
 import json
+import multiprocessing as mp
 import os
 import random
 import string
@@ -41,6 +42,8 @@ import paramiko
 
 from abcloud.utils import ec2utils, progbar
 from abcloud.utils.config import *
+
+from abtools.jobs import monitor_mp_jobs
 
 
 class Cluster(object):
@@ -220,7 +223,8 @@ class Cluster(object):
 
         # get AMI
         if self.opts.ami is None:
-            self.opts.ami = ABTOOLS_AMI_MAP[self.opts.abtools_version]
+            # self.opts.ami = ABTOOLS_AMI_MAP[self.opts.abtools_version]
+            self.opts.ami = UBUNTU_AMI_MAP[self.opts.region]
         try:
             self.image = [i for i in self.ec2.images.filter(ImageIds=[self.opts.ami])][0]
         except:
@@ -528,6 +532,29 @@ class Cluster(object):
         instance_lookup = dict(self.master, **self.workers)
         instance_names = sorted(instance_lookup.keys())
 
+        # # update Ab[x] tools
+        # self.update_abx(instances)
+
+        # build base image
+        print('')
+        if len(instances) == 1:
+            print('Building base image...')
+            configure_base_image(instances[0].public_ip_address,
+                                 self.opts.user,
+                                 self.opts.identity_file)
+        else:
+            print('Building base image on all nodes...')
+            p = mp.Pool(len(instances))
+            async_results = []
+            for instance in instances:
+                async_results.append(p.apply_async(configure_base_image,
+                                                   args=(instance.public_ip_address,
+                                                         self.opts.user,
+                                                         self.opts.identity_file)))
+            monitor_mp_jobs(async_results)
+            p.close()
+            p.join()
+
         # deploy SSH key to nodes for passwordless SSH
         print('')
         print("Generating cluster's SSH key on master...")
@@ -601,6 +628,13 @@ class Cluster(object):
             return instance.private_ip_address
         else:
             return instance.public_ip_address
+
+
+    def update_abx(instances):
+        print('\nUpdating Ab[x] tools...')
+        abx_cmd = '/home/ubuntu/anaconda2/bin/pip install abstar abtools'
+        for instance in instances:
+            self.run(instance, abx_cmd)
 
 
     def build_ebs_raid_volume(self, devices, node_name=None, mount=None, raid_level=None):
@@ -690,17 +724,26 @@ class Cluster(object):
             self.master_name, volume))
         nfs_mount_cmd = "sudo mkdir {0} && sudo mount {1}:{0} {0} && sudo chmod 777 {0}".format(
             volume, self.master_name)
-        progbar.progress_bar(0, len(self.worker_instances))
-        for i, instance in enumerate(self.worker_instances):
-            self.run(instance, nfs_mount_cmd)
-            progbar.progress_bar(i + 1, len(self.worker_instances))
-        print('')
+        # progbar.progress_bar(0, len(self.worker_instances))
+        # for i, instance in enumerate(self.worker_instances):
+        #     self.run(instance, nfs_mount_cmd)
+        #     progbar.progress_bar(i + 1, len(self.worker_instances))
+        # print('')
+        run_ssh_multi(export_cmd,
+                      self.worker_instances,
+                      self.opts.user,
+                      self.opts.identity_file)
 
 
     def start_redis_server(self, instance):
-        redis_cmd = 'sudo rm /etc/redis/6379.conf'
-        redis_cmd += " && echo 'daemonize yes' | sudo tee -a /etc/redis/6379.conf"
-        redis_cmd += ' && /home/ubuntu/anaconda2/bin/redis-server /etc/redis/6379.conf'
+        redis_conf = 'daemonize yes\npidfile /var/run/redis_6379.pid\n'
+        redis_conf += 'port 6379\nlogfile /var/redis/redis_6379.log\ndir /var/redis/6379'
+        redis_cmd = "sudo mkdir /etc/redis \
+            && sudo mkdir /var/redis \
+            && sudo chmod 777 /var/redis \
+            && sudo mkdir /var/redis/6379 \
+            && printf '{}' | sudo tee /etc/redis/6379.conf \
+            && /home/ubuntu/anaconda2/bin/redis-server /etc/redis/6379.conf".format(redis_conf)
         self.run(instance, redis_cmd)
 
 
@@ -709,17 +752,32 @@ class Cluster(object):
         print('Starting Celery worker processes:')
         celery_cmd = '/home/ubuntu/anaconda2/bin/celery '
         celery_cmd += '-A abstar.utils.queue.celery worker -l info --detach'
-        progbar.progress_bar(0, len(instances))
-        for i, instance in enumerate(instances):
-            self.run(instance, celery_cmd)
-            progbar.progress_bar(i + 1, len(instances))
-        print('')
+        # progbar.progress_bar(0, len(instances))
+        # for i, instance in enumerate(instances):
+        #     self.run(instance, celery_cmd)
+        #     progbar.progress_bar(i + 1, len(instances))
+        # print('')
+        # p = mp.Pool(len(instances))
+        # async_results = []
+        # for instance in instances:
+        #     async_results.append(p.apply_async(run_ssh, args=(celery_cmd,
+        #                                                       instance.public_ip_address,
+        #                                                       self.opts.user,
+        #                                                       self.opts.identity_file)))
+        # monitor_mp_jobs(async_results)
+        # p.close()
+        # p.join()
+        run_ssh_multi(celery_cmd,
+                      self.worker_instances,
+                      self.opts.user,
+                      self.opts.identity_file)
 
 
     def start_flower(self):
         print('')
         print('Starting Flower server on master...')
-        flower_cmd = '''screen -d -m bash -c "/home/ubuntu/anaconda2/bin/flower -A abstar.utils.queue.celery"'''
+        flower_cmd = '''/home/ubuntu/anaconda2/bin/pip install flower \
+            && screen -d -m bash -c "/home/ubuntu/anaconda2/bin/flower -A abstar.utils.queue.celery"'''
         self.run(self.master_instance, flower_cmd)
         print('Flower URL: http://{}:5555'.format(self.master_instance.public_ip_address))
 
@@ -807,7 +865,7 @@ class Cluster(object):
         config['jupyter'] = self.opts.jupyter
         config['jupyter_port'] = 8899
         config['jupyter_password'] = self.opts.jupyter_password
-        config['abtools_version'] = self.opts.abtools_version
+        # config['abtools_version'] = self.opts.abtools_version
         jstring = json.dumps(config)
         write_config_cmd = "sudo echo '{}' >> {}".format(jstring, config_file)
         self.run(self.master_instance, write_config_cmd)
@@ -818,6 +876,150 @@ class Cluster(object):
         read_opts_cmd = "sudo cat '{}'".format(opts_file)
         stdout, _ = self.run(instance, read_opts_cmd)
         return pickle.loads(stdout)
+
+
+def configure_base_image(ip_address, user, identity_file, debug=False):
+    # Initial configuration
+    init_cmd = 'sudo apt-get update --fix-missing \
+        && sudo apt-get install -y build-essential wget bzip2 \
+        ca-certificates libglib2.0-0 libxext6 libsm6 libxrender1 pigz s3cmd git mercurial \
+        subversion libtool automake zlib1g-dev libbz2-dev pkg-config muscle mafft cd-hit unzip \
+        libfontconfig1 \
+        && sudo ln -s /usr/bin/cdhit /usr/bin/cd-hit \
+        && sudo mkdir /tools \
+        && sudo chmod 777 /tools'
+    o, e = run_ssh(init_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nINITIAL CONFIGURATION')
+        print(o)
+        print(e)
+    # Anaconda
+    conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda2/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
+        && cd /tools \
+        && wget --quiet https://repo.continuum.io/archive/Anaconda2-4.0.0-Linux-x86_64.sh \
+        && /bin/bash ./Anaconda2-4.0.0-Linux-x86_64.sh -b -p /home/ubuntu/anaconda2 \
+        && rm /tools/Anaconda2-4.0.0-Linux-x86_64.sh \
+        && export PATH=/home/ubuntu/anaconda2/bin:$PATH"
+    o, e = run_ssh(conda_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nANACONDA')
+        print(o)
+        print(e)
+    # MongoDB
+    mongo_cmd = 'sudo apt-key adv --keyserver ha.pool.sks-keyservers.net --recv-keys "DFFA3DCF326E302C4787673A01C4E7FAAAB2461C" \
+        && sudo apt-key adv --keyserver ha.pool.sks-keyservers.net --recv-keys "42F3E95A2C4F08279C4960ADD68FA50FEA312927" \
+        && export MONGO_MAJOR=3.2 \
+        && export MONGO_VERSION=3.2.4 \
+        && echo "deb http://repo.mongodb.org/apt/debian wheezy/mongodb-org/$MONGO_MAJOR main" | sudo tee /etc/apt/sources.list.d/mongodb-org.list \
+        && sudo apt-get update \
+        && sudo apt-get install -y \
+            mongodb-org=$MONGO_VERSION \
+            mongodb-org-server=$MONGO_VERSION \
+            mongodb-org-shell=$MONGO_VERSION \
+            mongodb-org-mongos=$MONGO_VERSION \
+            mongodb-org-tools=$MONGO_VERSION \
+        && sudo rm -rf /var/lib/apt/lists/* \
+        && sudo rm -rf /var/lib/mongodb \
+        && sudo mv /etc/mongod.conf /etc/mongod.conf.orig'
+    o, e = run_ssh(mongo_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nMONGODB')
+        print(o)
+        print(e)
+    # PANDAseq
+    panda_cmd = 'cd /tools \
+        && git clone https://github.com/neufeld/pandaseq \
+        && cd pandaseq \
+        && sudo ./autogen.sh \
+        && sudo ./configure \
+        && sudo make \
+        && sudo make install \
+        && sudo ldconfig'
+    o, e = run_ssh(panda_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nPANDASEQ')
+        print(o)
+        print(e)
+    # BaseSpace Python SDK
+    bs_cmd = 'cd /tools \
+        && git clone https://github.com/basespace/basespace-python-sdk \
+        && cd basespace-python-sdk/src \
+        && /home/ubuntu/anaconda2/bin/python setup.py install'
+    o, e = run_ssh(bs_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nBASESPACE PYTHON SDK')
+        print(o)
+        print(e)
+    # FASTQC
+    fqc_cmd = 'cd /tools \
+        && wget http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.5.zip \
+        && unzip fastqc_v0.11.5.zip \
+        && sudo ln -s FastQC/fastqc /usr/local/bin/fastqc'
+    o, e = run_ssh(fqc_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nFASTQC')
+        print(o)
+        print(e)
+    # cutadapt
+    cut_cmd = '/home/ubuntu/anaconda2/bin/pip install cutadapt'
+    o, e = run_ssh(cut_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nCUTADAPT')
+        print(o)
+        print(e)
+    # Sickle
+    sickle_cmd = 'cd /tools \
+        && wget http://zlib.net/zlib128.zip \
+        && unzip zlib128.zip \
+        && cd zlib-1.2.8 \
+        && ./configure \
+        && make \
+        && sudo make install \
+        && cd /tools \
+        && git clone https://github.com/najoshi/sickle \
+        && cd sickle \
+        && make \
+        && sudo ln -s ./sickle /usr/local/bin/sickle'
+    o, e = run_ssh(sickle_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nSICKLE')
+        print(o)
+        print(e)
+    # AbStar
+    abstar_cmd = '/home/ubuntu/anaconda2/bin/pip install abstar'
+    o, e = run_ssh(abstar_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nABSTAR')
+        print(o)
+        print(e)
+
+
+def run_ssh(cmd, ip_address, user, identity_file, stdin=None):
+    with paramiko.SSHClient() as ssh:
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(
+            ip_address,
+            username=user,
+            key_filename=identity_file)
+        _stdin, stdout, stderr = ssh.exec_command(cmd)
+        if stdin is not None:
+            _stdin.write(stdin)
+        while not stdout.channel.exit_status_ready():
+            time.sleep(1)
+    return stdout.read(), stderr.read()
+
+
+def run_ssh_multi(cmd, instances, user, identity_file):
+    p = mp.Pool(len(instances))
+    async_results = []
+    for instance in instances:
+        async_results.append(p.apply_async(run_ssh, args=(cmd,
+                                                          instance.public_ip_address,
+                                                          user,
+                                                          identity_file)))
+    monitor_mp_jobs(async_results)
+    p.close()
+    p.join()
 
 
 def retrieve_cluster(cluster_name, opts):
@@ -860,7 +1062,7 @@ def print_cluster_info(name, cluster):
         mip = cluster.master_instance.public_ip_address if cluster.master_instance is not None else 'None'
         print('size: {}'.format(mcount + wcount))
         print('')
-        print('number of master instances: {}'.format(mcount))
+        # print('number of master instances: {}'.format(mcount))
         print('master instance type: {}'.format(mtype))
         print('master instance IP address: {}'.format(mip))
 
@@ -903,7 +1105,7 @@ def check_for_basespace_credentials(cluster):
 
 
 def get_celery_info(cluster):
-    celery_info_cmd = '/home/ubuntu/anaconda/bin/celery -A abstar.utils.queue.celery status'
+    celery_info_cmd = '/home/ubuntu/anaconda2/bin/celery -A abstar.utils.queue.celery status'
     info = cluster.run(cluster.master_instance, celery_info_cmd)[0]
     total = 0
     running = 0
