@@ -66,13 +66,13 @@ def parse_args(print_help=False):
         help="Number of workers to launch (default: 0)")
     parser.add_argument(
         "-k", "--key-pair", default='default',
-        help="Key pair to use on instances (default: %default)")
+        help="Key pair to use on instances (default: default)")
     parser.add_argument(
         "-i", "--identity-file", default=IDENTITY_FILE_PATH,
-        help="SSH private key file to use for logging into instances (default: %default)")
+        help="SSH private key file to use for logging into instances.")
     parser.add_argument(
         "-t", "--instance-type", default=INSTANCE_TYPE,
-        help="Type of worker node instances to launch (default: %default). \
+        help="Type of worker node instances to launch. \
              WARNING: must be 64-bit; small instances won't work")
     parser.add_argument(
         "-m", "--master-instance-type", default=None,
@@ -82,15 +82,13 @@ def parse_args(print_help=False):
         help="Node to SSH into (use with sshmaster or sshnode actions) or for put/get operations.")
     parser.add_argument(
         "-r", "--region", default="us-east-1",
-        help="EC2 region used to launch instances in, or to find them in (default: %default)")
+        help="EC2 region used to launch instances in, or to find them in (default: us-east-1)")
     parser.add_argument(
-        "-z", "--zone", default=None,
-        help="Availability zone to launch instances in, or 'all' to spread \
-             workers across multiple (an additional $0.01/Gb for bandwidth \
-             between zones applies) (default: a single zone chosen at random)")
+        "-z", "--zone", default='us-east-1c',
+        help="Availability zone to launch instances in (default: us-east-1c)")
     parser.add_argument(
         "-a", "--ami", default=None,
-        help="Amazon Machine Image ID to use (default: %default)")
+        help="Amazon Machine Image ID to use")
     # parser.add_argument(
     #     "--abtools-version", default=DEFAULT_ABTOOLS_VERSION,
     #     help="Version of AbTools to use: 'X.Y.Z' (default: %default)")
@@ -103,16 +101,19 @@ def parse_args(print_help=False):
              If you omit it, the last directory of the --deploy-root-dir path will be created \
              in / before copying its contents. If you append the trailing slash, \
              the directory is not created and its contents are copied directly into /. \
-             (default: %default, directory: {}).".format(DEPLOY_TO_ROOT))
+             (default: False, directory: {}).".format(DEPLOY_TO_ROOT))
     parser.add_argument(
         "--resume", action="store_true", default=False,
         help="Resume installation on a previously launched cluster \
              (for debugging)")
     parser.add_argument(
+        "--master-root-vol-size", metavar="ROOT_SIZE", type=int, default=50,
+        help="Size (in GB) of the root EBS volume to be attached to the master node.")
+    parser.add_argument(
         "--master-ebs-vol-size", metavar="SIZE", type=int, default=25,
         help="Size (in GB) of each EBS volume to be attached to the master node.")
     parser.add_argument(
-        "--master-ebs-vol-type", default="standard",
+        "--master-ebs-vol-type", default="gp2",
         help="EBS volume type (e.g. 'gp2', 'standard').")
     parser.add_argument(
         "--master-ebs-vol-num", type=int, default=4,
@@ -126,11 +127,11 @@ def parse_args(print_help=False):
     parser.add_argument(
         "--master-ebs-raid-level", metavar="LEVEL", type=int, default=0,
         help="RAID level (just the number) for the array on master \
-             (default: %default).")
+             (default: 0).")
     parser.add_argument(
         "--master-ebs-raid-dir", metavar="DIR", default='/data',
         help="Directory for the RAID array on master node \
-             (default: %default).")
+             (default: /data).")
     parser.add_argument(
         "--ebs-vol-size", metavar="SIZE", type=int, default=0,
         help="Size (in GB) of each EBS volume.")
@@ -167,7 +168,7 @@ def parse_args(print_help=False):
     parser.add_argument("--no-basespace-credentials", action="store_false", dest="basespace_credentials", default=True,
         help="If set, BaseSpace credentials file will NOT be uploaded to the server/cluster.")
     parser.add_argument("-u", "--user", default="ubuntu",
-        help="The SSH user you want to connect as (default: %default)")
+        help="The SSH user you want to connect as (default: ubuntu)")
     parser.add_argument("--delete-groups", action="store_true", default=False,
         help="When destroying a cluster, delete the security groups that were created")
     parser.add_argument("--use-existing-master", action="store_true", default=False,
@@ -207,7 +208,7 @@ def parse_args(print_help=False):
     #     help="Path to a user-data file (most AMIs interpret this as an initialization script)")
     parser.add_argument(
         "--authorized-address", type=str, default="0.0.0.0/0",
-        help="Address to authorize on created security groups (default: %default)")
+        help="Address to authorize on created security groups (default: 0.0.0.0/0)")
     # parser.add_argument(
     #     "--additional-security-group", type="string", default="",
     #     help="Additional security group to place the machines in")
@@ -218,17 +219,34 @@ def parse_args(print_help=False):
         "--subnet-id", default=None,
         help="VPC subnet to launch instances in")
     parser.add_argument(
+        "--subnet-cidr-block", default='10.0.0.0/24',
+        help="CIDR block for the subnet. \
+        Note that this must be equal to or smaller than the size of the VPC CIDR block. \
+        Default is 10.0.0.0/24, which is 256 addresses.")
+    parser.add_argument(
         "--vpc-id", default=None,
-        help="VPC to launch instances in")
+        help="VPC to launch instances in. \
+        If supplying a VPC ID, the VPC must alread exist and contain enough space for the requested subnet. \
+        If either of these conditions aren't met, a new VPC will be created.")
+    parser.add_argument(
+        "--vpc-cidr-block", default='10.0.0.0/16',
+        help="CIDR block for the VPC, if a new one is to be created. \
+        If a VPC already exists and has enough available addresses for the desired subnet size, \
+        a new VPC will not be created. \
+        Default is 10.0.0.0/16, which is 65,536 addresses.")
     parser.add_argument(
         "--private-ips", action="store_true", default=False,
         help="Use private IPs for instances rather than public if VPC/subnet \
         requires that.")
+    parser.add_argument(
+        '-D', '--debug', dest='debug', action='store_true', default=False,
+        help="If set, will run in debug mode.")
 
     args = parser.parse_args()
     opts = args.options
     if len(opts) == 2:
         action, cluster_name = opts
+        args.action = action
     elif len(opts) == 1 and opts[0] == 'list':
         action = 'list'
         cluster_name = None
@@ -250,7 +268,7 @@ class Args(object):
     def __init__(self, action, cluster_name=None, path1=None, path2=None, localpath=None,
         remotepath=None, workers=0, key_pair='default', identity_file=IDENTITY_FILE_PATH,
         instance_type=INSTANCE_TYPE, master_instance_type=None,
-        node=None, region='us-east-1', zone=None, ami=None,
+        node=None, region='us-east-1', zone=None, ami=None, master_root_vol_size=50,
         deploy_root_dir=False, resume=False, master_ebs_vol_size=25, master_ebs_vol_num=4,
         master_ebs_raid_level=0, master_ebs_raid_dir='\data',
         ebs_vol_size=0, ebs_vol_type='standard', ebs_vol_num=1,
@@ -275,6 +293,7 @@ class Args(object):
         self.ami = ami
         self.deploy_root_dir = deploy_root_dir
         self.resume = resume
+        self.master_root_vol_size = master_root_vol_size
         self.master_ebs_vol_size = master_ebs_vol_size
         self.master_ebs_vol_num = master_ebs_vol_num
         self.master_ebs_raid_level = master_ebs_raid_level

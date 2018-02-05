@@ -35,6 +35,7 @@ import string
 import subprocess
 import sys
 import time
+import traceback
 
 import boto3
 
@@ -48,7 +49,7 @@ from abtools.jobs import monitor_mp_jobs
 
 class Cluster(object):
     """docstring for Cluster"""
-    def __init__(self, name, opts=None, master_instance=None):
+    def __init__(self, name, opts=None, vpc=None, master_instance=None):
         super(Cluster, self).__init__()
         self.ec2 = boto3.resource('ec2')
         self.ec2c = boto3.client('ec2')
@@ -59,6 +60,10 @@ class Cluster(object):
             self.opts = self.retrieve_opts(master_instance)
         else:
             self.opts = None
+        self._vpc = vpc
+        self._internet_gateway = None
+        self._subnet = None
+        self._route_table = None
         self.master_group_name = '@abcloud-' + self.name + '-master'
         self.worker_group_name = '@abcloud-' + self.name + '-worker'
         self._master_group = None
@@ -73,13 +78,129 @@ class Cluster(object):
 
 
     @property
+    def vpc(self):
+        if self._vpc is None:
+            # check to see if security groups for the cluster have already been created
+            # if so, use the VPC associated with the master security group
+            master_sg_name = '@abcloud-' + self.name + '-master'
+            master_group = ec2utils.retrieve_existing_security_group(self.ec2, master_sg_name)
+            if master_group is not None:
+                self._vpc = [v for v in self.ec2.vpcs.all() if v.id == master_group.vpc_id][0]
+            else:
+                # if we're launching a new cluster without workers, use the 'singletons' VPC
+                if all([self.opts.action == 'launch', self.opts.workers == 0]):
+                    vpc_name = 'singletons'
+                else:
+                    vpc_name = self.name
+                self._vpc = ec2utils.get_or_make_vpc(self.ec2,
+                                                     self.ec2c,
+                                                     vpc_name,
+                                                     self.opts.vpc_id,
+                                                     self.opts.vpc_cidr_block)
+            # Verify that the other VPC-related resources exist
+            self.master_group
+            self.worker_group
+            self.internet_gateway
+            self.subnet
+            self.route_table
+            # make sure the main route_table for the VPC directs traffic to the internet gateway
+            # print('Adding route to the internet gateway in the main VPC route table')
+            vpc_main_route_table = [r for r in self._vpc.route_tables.all() if any([a['Main'] for a in r.associations_attribute])][0]
+            vpc_main_route_table.create_route(DestinationCidrBlock='0.0.0.0/0',
+                                              GatewayId=self.internet_gateway.id)
+        return self._vpc
+
+    @vpc.setter
+    def vpc(self, vpc):
+        self._vpc = vpc
+
+
+    @property
+    def internet_gateway(self):
+        if self._internet_gateway is None:
+            # print('Getting or making internet gateway')
+            self._internet_gateway = ec2utils.get_or_make_internet_gateway(self.ec2, self.vpc)
+        return self._internet_gateway
+
+    @internet_gateway.setter
+    def internet_gateway(setlf, igw):
+        self._internet_gateway = igw
+
+
+    @property
+    def subnet(self):
+        if self._subnet is None:
+            # check for an existing subnet
+            all_subnets = list(self.ec2.subnets.all())
+            cluster_subnets = []
+            for subnet in all_subnets:
+                if subnet.tags is None:
+                    continue
+                tags = [tag['Value'] for tag in subnet.tags if tag['Key'] == 'Name' and tag['Value'] == self.name]
+                if tags:
+                    cluster_subnets.append(subnet)
+            # if a subnet already exists, use that one
+            if cluster_subnets:
+                print('\nSubnet already exists for this cluster')
+                self._subnet = cluster_subnets[0]
+            else:
+                print('\nCreating a new subnet: ', end='')
+                self._subnet = self.ec2.create_subnet(VpcId=self.vpc.id,
+                                                      CidrBlock=self.opts.subnet_cidr_block,
+                                                      AvailabilityZone=self.opts.zone)
+                subnet_waiter = self.ec2c.get_waiter('subnet_available')
+                subnet_waiter.wait(SubnetIds=[self._subnet.id])
+                print(self._subnet.id)
+                self._subnet.create_tags(Tags=[{'Key': 'Name', 'Value': self.name}])
+                print('Naming subnet')
+                self.ec2c.modify_subnet_attribute(SubnetId=self._subnet.id,
+                                                  MapPublicIpOnLaunch={'Value': True})
+                print('Modifying subnet to map public IP addresses upon instance launch')
+        return self._subnet
+
+    @subnet.setter
+    def subnet(self, subnet):
+        self._subnet = subnet
+
+
+    @property
+    def route_table(self):
+        if self._route_table is None:
+            # check for an existing route table
+            all_route_tables = list(self.ec2.route_tables.all())
+            cluster_route_tables = []
+            for route_table in all_route_tables:
+                if route_table.tags is None:
+                    continue
+                tags = [tag['Value'] for tag in route_table.tags if tag['Key'] == 'Name' and tag['Value'] == self.name]
+                if tags:
+                    cluster_route_tables.append(route_table)
+            # if a route table already exists, use that one
+            if cluster_route_tables:
+                print('Route table already exists for this cluster')
+                self._route_table = cluster_route_tables[0]
+            else:
+                print('Creating a new route table: ', end='')
+                self._route_table = self.ec2.create_route_table(VpcId=self.vpc.id)
+                print(self._route_table.id)
+                print("Naming subnet's route table")
+                self._route_table.create_tags(Tags=[{'Key': 'Name', 'Value': self.name}])
+                print('Creating a route to the internet gateway')
+                self._route_table.create_route(DestinationCidrBlock='0.0.0.0/0',
+                                               GatewayId=self.internet_gateway.id)
+                print('Associating route table with the subnet')
+                self._route_table.associate_with_subnet(SubnetId=self.subnet.id)
+        return self._route_table
+
+
+    @property
     def master_group(self):
         if self._master_group is None:
-            vpc_id = None if self.opts is None else self.opts.vpc_id
+            # vpc_id = None if self.opts is None else self.opts.vpc_id
             self._master_group = ec2utils.get_or_make_group(
                 self.ec2,
                 self.master_group_name,
-                vpc_id)
+                vpc_id=self.vpc.id)
         return self._master_group
 
     @master_group.setter
@@ -90,11 +211,11 @@ class Cluster(object):
     @property
     def worker_group(self):
         if self._worker_group is None:
-            vpc_id = None if self.opts is None else self.opts.vpc_id
+            # vpc_id = None if self.opts is None else self.opts.vpc_id
             self._worker_group = ec2utils.get_or_make_group(
                 self.ec2,
                 self.worker_group_name,
-                vpc_id)
+                vpc_id=self.vpc.id)
         return self._worker_group
 
     @worker_group.setter
@@ -159,6 +280,42 @@ class Cluster(object):
         self._image = image
 
 
+    def _retrieve_vpc(self, vpc_id):
+        if vpc_id is None:
+            return None
+        vpcs = [v for v in self.vpcs.all() if v.id == vpc_id]
+        if vpcs:
+            return vpcs[0]
+        return None
+
+
+    def _retrieve_subnet(self, subnet_id):
+        if subnet_id is None:
+            return None
+        subnets = [s for s in self.subnets.all() if s.id == subnet_id]
+        if subnets:
+            return subnets[0]
+        return None
+
+
+    def _retrieve_internet_gateway(self, internet_gateway_id):
+        if internet_gateway_id is None:
+            return None
+        internet_gateways = [i for i in self.internet_gateways.all() if i.id == internet_gateway_id]
+        if internet_gateways:
+            return internet_gateways[0]
+        return None
+
+
+    def _retrieve_route_table(self, route_table_id):
+        if route_table_id is None:
+            return None
+        route_tables = [r for r in self.route_tables.all() if r.id == route_table_id]
+        if route_tables:
+            return route_tables[0]
+        return None
+
+
     def load(self):
         masters, workers = ec2utils.get_existing_instances(
             self.ec2,
@@ -170,10 +327,11 @@ class Cluster(object):
             return self
         self.master_instance = masters[0]
         self.worker_instances = workers
-        # self.opts = self.retrieve_opts(self.master_instance)
+
         # get master instance information
         self.master_name = [d['Value'] for d in self.master_instance.tags if 'Name' in d.values()][0]
         self.master = {self.master_name: self.master_instance}
+
         # get worker instance information
         self.workers = {}
         for i in self.worker_instances:
@@ -188,7 +346,7 @@ class Cluster(object):
         auth_master = False if len(self.master_group.ip_permissions) > 0 else True
         auth_worker = False if len(self.worker_group.ip_permissions) > 0 else True
         if any([auth_master, auth_worker]):
-            ec2utils.intracluster_auth(self.master_group, self.worker_group)
+            ec2utils.intracluster_auth(self)
         if auth_master:
             ec2utils.authorize_ports(
                 self.master_group,
@@ -223,7 +381,6 @@ class Cluster(object):
 
         # get AMI
         if self.opts.ami is None:
-            # self.opts.ami = ABTOOLS_AMI_MAP[self.opts.abtools_version]
             self.opts.ami = UBUNTU_AMI_MAP[self.opts.region]
         try:
             self.image = [i for i in self.ec2.images.filter(ImageIds=[self.opts.ami])][0]
@@ -233,6 +390,10 @@ class Cluster(object):
 
         # setup master BlockDeviceMappings
         master_block_device_mappings = []
+        # first thing to add to master_block_device_mapping is the root volume
+        root_map = {'DeviceName': '/dev/sda1', 'Ebs': {'VolumeSize': self.opts.master_root_vol_size,
+                                                       'VolumeType': 'gp2'}}
+        master_block_device_mappings.append(root_map)
         for i in range(self.opts.master_ebs_vol_num):
             # EBS volumes are /dev/xvdaa, /dev/xvdab...
             device_name = "/dev/xvda" + string.ascii_lowercase[i]
@@ -262,12 +423,14 @@ class Cluster(object):
                     self.opts.workers, '' if self.opts.workers == 1 else 's'))
                 worker_response = ec2utils.request_spot_instance(
                     self.ec2c,
-                    group_name=self.worker_group_name,
+                    # group_name=self.worker_group_name,
                     price=self.opts.spot_price,
                     ami=self.opts.ami,
                     num=self.opts.workers,
                     key_pair=self.opts.key_pair,
-                    instance_type=self.opts.instance_type)
+                    instance_type=self.opts.instance_type,
+                    subnet_id=self.subnet.id,
+                    security_group_ids=[self.worker_group.id, ])
             else:
                 worker_response = {'SpotInstanceRequests': []}
                 self.worker_instances = self.ec2.create_instances(
@@ -276,7 +439,8 @@ class Cluster(object):
                     MaxCount=self.opts.workers,
                     KeyName=self.opts.key_pair,
                     InstanceType=self.opts.instance_type,
-                    SecurityGroups=[self.worker_group_name])
+                    SecurityGroupIds=[self.worker_group.id],
+                    SubnetId=self.subnet.id)
         else:
             worker_response = {'SpotInstanceRequests': []}
 
@@ -285,12 +449,14 @@ class Cluster(object):
             print('Requesting a spot instance for master node...')
             master_response = ec2utils.request_spot_instance(
                 self.ec2c,
-                group_name=self.master_group_name,
+                # group_name=self.master_group_name,
                 price=self.opts.spot_price,
                 ami=self.opts.ami,
                 num=1,
                 key_pair=self.opts.key_pair,
                 instance_type=self.opts.master_instance_type,
+                subnet_id=self.subnet.id,
+                security_group_ids=[self.master_group.id, ],
                 block_device_mappings=master_block_device_mappings)
         else:
             master_response = {'SpotInstanceRequests': []}
@@ -300,7 +466,8 @@ class Cluster(object):
                 MaxCount=1,
                 KeyName=self.opts.key_pair,
                 InstanceType=self.opts.master_instance_type,
-                SecurityGroups=[self.master_group_name],
+                SecurityGroupIds=[self.master_group.id, ],
+                SubnetId=self.subnet.id,
                 BlockDeviceMappings=master_block_device_mappings)
             self.master_instance = master_instances[0]
 
@@ -357,6 +524,7 @@ class Cluster(object):
         else:
             self.master_name = self.name
             self.worker_names = []
+            self.master = {self.master_name: self.master_instance}
             self.master_instance.create_tags(Tags=[{'Key': 'Name',
                                                     'Value': self.master_name}])
 
@@ -366,9 +534,10 @@ class Cluster(object):
 
     def destroy(self):
         self.terminate()
+        print('Retrieving cluster configuration information...')
+        self.vpc
         print('')
         print('Deleting security groups (this may take some time)...')
-        print('')
         # remove rules from security groups before deleting
         print('Deleting rules in {}'.format(self.master_group_name))
         master_permissions = self.master_group.ip_permissions
@@ -387,6 +556,37 @@ class Cluster(object):
         self.master_group.delete()
         print('Deleting {}'.format(self.worker_group_name))
         self.worker_group.delete()
+        # delete subnet
+        print('')
+        print('Deleting subnet...')
+        subnet_id = self.subnet.id
+        self.subnet.delete()
+        subnet_ids = [s.id for s in self.vpc.subnets.all()]
+        print('Waiting for subnet to be gone')
+        while subnet_id in subnet_ids:
+            subnet = [s for s in self.vpc.subnets.all() if s.id == subnet_id][0]
+            print('Subnet state: {}'.format(subnet.state))
+            time.wait(10)
+            subnet_ids = [s.id for s in vpc.subnets.all()]
+            print(', '.join(subnet_ids))
+        # delete route table
+        print('Deleting route table...')
+        self.route_table.delete()
+        # we only want to delete the internet gateway and VPC
+        # if no other subnets exist in the VPC.
+        if self.vpc.subnets.all():
+            print('Additional subnets exist within VPC {}, so the VPC and internet gateway will not be deleted.'.format(self.vpc.id))
+            subnet_ids = [s.id for s in self.vpc.subnets.all()]
+            print(', '.join(subnet_ids))
+        else:
+            # delete internet gateway
+            print('Deleting internet gateway...')
+            self.internet_gateway.detach_from_vpc(VpcId=self.vpc.id)
+            self.internet_gateway.delete()
+            # delete VPC
+            print('Deleting VPC...')
+            self.vpc.delete()
+        print('\n\n')
 
 
     def terminate(self):
@@ -402,6 +602,9 @@ class Cluster(object):
             if any(all_instances):
                 instances = [instance for name, instance in all_instances]
                 self.terminate_instances(self.ec2c, instances)
+        else:
+            print('\nAborting cluster termination.\n\n')
+            sys.exit()
 
     @staticmethod
     def terminate_instances(ec2c, instances):
@@ -532,16 +735,14 @@ class Cluster(object):
         instance_lookup = dict(self.master, **self.workers)
         instance_names = sorted(instance_lookup.keys())
 
-        # # update Ab[x] tools
-        # self.update_abx(instances)
-
         # build base image
         print('')
         if len(instances) == 1:
             print('Building base image...')
             configure_base_image(instances[0].public_ip_address,
                                  self.opts.user,
-                                 self.opts.identity_file)
+                                 self.opts.identity_file,
+                                 self.opts.debug)
         else:
             print('Building base image on all nodes...')
             p = mp.Pool(len(instances))
@@ -550,7 +751,8 @@ class Cluster(object):
                 async_results.append(p.apply_async(configure_base_image,
                                                    args=(instance.public_ip_address,
                                                          self.opts.user,
-                                                         self.opts.identity_file)))
+                                                         self.opts.identity_file,
+                                                         self.opts.debug)))
             monitor_mp_jobs(async_results)
             p.close()
             p.join()
@@ -575,7 +777,7 @@ class Cluster(object):
             print('')
 
         # modify /etc/hosts on all nodes
-        print('Updating /etc/hosts on all nodes...')
+        print('\nUpdating /etc/hosts on all nodes...')
         hosts = ['{} {}'.format(self.get_ip(i), n) for n, i in instance_lookup.items()]
         host_string = '\n'.join(hosts)
         host_cmd = """sudo -- sh -c 'echo "{}" >> /etc/hosts'""".format(host_string)
@@ -630,21 +832,15 @@ class Cluster(object):
             return instance.public_ip_address
 
 
-    def update_abx(instances):
-        print('\nUpdating Ab[x] tools...')
-        abx_cmd = '/home/ubuntu/anaconda2/bin/pip install abstar abtools'
-        for instance in instances:
-            self.run(instance, abx_cmd)
-
-
     def build_ebs_raid_volume(self, devices, node_name=None, mount=None, raid_level=None):
         if node_name is None or node_name.lower == 'master':
             node_name = self.master_name
             instance = self.master_instance
         else:
             if node_name not in self.worker_names:
-                print('ERROR: The supplied node name ({})is not a worker.'.format(node_name))
-                sys.exit(1)
+                print('\nERROR: EBS was not configured on {} because the supplied node name is not a worker.'.format(node_name))
+                # sys.exit(1)
+                return mount
             instance = self.workers[node_name]
         mount = mount if mount is not None else self.opts.master_ebs_raid_dir
         raid_level = raid_level if raid_level else self.opts.master_ebs_raid_level
@@ -697,8 +893,9 @@ class Cluster(object):
             instance = self.master_instance
         else:
             if node_name not in self.worker_names:
-                print('ERROR: The supplied node name ({})is not a worker.'.format(node_name))
-                sys.exit(1)
+                print('\nERROR: EBS was not configured on {} because the supplied node name is not a worker.'.format(node_name))
+                # sys.exit(1)
+                return mount
             instance = self.workers[node_name]
         mount = mount if mount is not None else self.opts.master_ebs_raid_dir
         print('')
@@ -724,12 +921,7 @@ class Cluster(object):
             self.master_name, volume))
         nfs_mount_cmd = "sudo mkdir {0} && sudo mount {1}:{0} {0} && sudo chmod 777 {0}".format(
             volume, self.master_name)
-        # progbar.progress_bar(0, len(self.worker_instances))
-        # for i, instance in enumerate(self.worker_instances):
-        #     self.run(instance, nfs_mount_cmd)
-        #     progbar.progress_bar(i + 1, len(self.worker_instances))
-        # print('')
-        run_ssh_multi(export_cmd,
+        run_ssh_multi(nfs_mount_cmd,
                       self.worker_instances,
                       self.opts.user,
                       self.opts.identity_file)
@@ -752,21 +944,6 @@ class Cluster(object):
         print('Starting Celery worker processes:')
         celery_cmd = '/home/ubuntu/anaconda2/bin/celery '
         celery_cmd += '-A abstar.utils.queue.celery worker -l info --detach'
-        # progbar.progress_bar(0, len(instances))
-        # for i, instance in enumerate(instances):
-        #     self.run(instance, celery_cmd)
-        #     progbar.progress_bar(i + 1, len(instances))
-        # print('')
-        # p = mp.Pool(len(instances))
-        # async_results = []
-        # for instance in instances:
-        #     async_results.append(p.apply_async(run_ssh, args=(celery_cmd,
-        #                                                       instance.public_ip_address,
-        #                                                       self.opts.user,
-        #                                                       self.opts.identity_file)))
-        # monitor_mp_jobs(async_results)
-        # p.close()
-        # p.join()
         run_ssh_multi(celery_cmd,
                       self.worker_instances,
                       self.opts.user,
@@ -786,13 +963,14 @@ class Cluster(object):
         print('')
         print('Launching a Jupyter Notebook server on {}...'.format(
             self.master_name))
+
         # hash/salt the Jupyter login password
         sha1_py = 'from notebook.auth import passwd; print passwd("{}")'.format(
             self.opts.jupyter_password)
         sha1_cmd = "/home/ubuntu/anaconda2/bin/python -c '{}'".format(sha1_py)
         passwd = self.run(self.master_instance, sha1_cmd)[0].strip()
+
         # make a new Jupyter profile and directory; edit the config
-        # create_profile_cmd = '/home/ubuntu/anaconda2/bin/ipython profile create'
         create_profile_cmd = '/home/ubuntu/anaconda2/bin/jupyter notebook --generate-config'
         self.run(self.master_instance, create_profile_cmd)
         if self.opts.master_ebs_vol_num > 0:
@@ -802,16 +980,14 @@ class Cluster(object):
         mkdir_cmd = 'sudo mkdir {0} && sudo chmod 777 {0}'.format(notebook_dir)
         self.run(self.master_instance, mkdir_cmd)
         profile_config_string = '\n'.join([
-            # "c = get_config()", # already built-in to the pre-configured Jupyter config
-            # "c.IPKernelApp.pylab = 'inline'", # Jupyter doesn't support pre-configuring %pylab inline
             "c.NotebookApp.ip = '*'",
             "c.NotebookApp.open_browser = False",
             "c.NotebookApp.password = u'%s'" % passwd,
             "c.NotebookApp.port = 8899"])
         profile_config_cmd = 'echo "{}" '.format(profile_config_string)
-        # profile_config_cmd += '| sudo tee /home/ubuntu/.ipython/profile_default/ipython_notebook_config.py'
         profile_config_cmd += '| sudo tee /home/ubuntu/.jupyter/jupyter_notebook_config.py'
         self.run(self.master_instance, profile_config_cmd)
+
         # start a backgroud Jupyter instance
         jupyter_start_cmd = "/home/ubuntu/anaconda2/bin/jupyter notebook --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
         self.run(self.master_instance, jupyter_start_cmd)
@@ -822,6 +998,7 @@ class Cluster(object):
     def setup_mongodb(self):
         print('')
         print('Configuring MongoDB on master...')
+
         # prepare MongoDB's database directory
         dbpath = os.path.join(self.opts.master_ebs_raid_dir, 'db')
         init_cmd = ' && '.join([
@@ -832,6 +1009,7 @@ class Cluster(object):
             'sudo chown mongod:mongod /data /journal /log',
             'sudo ln -s /journal /data/journal'])
         self.run(self.master_instance, init_cmd)
+
         # start mongod
         print('Starting mongod...')
         mongod_start_cmd = 'mongod --fork --logpath /log/mongod.log '
@@ -852,9 +1030,14 @@ class Cluster(object):
         pstring = pickle.dumps(self.opts)
         write_opts_cmd = "sudo echo '{}' >> {}".format(pstring, opts_file)
         self.run(self.master_instance, write_opts_cmd)
+
         # write cluster parameters
         config_file = '/home/ubuntu/.abcloud_config'
         config = {}
+        config['vpc_id'] = self.vpc.id
+        config['subnet_id'] = self.subnet.id
+        config['internet_gateway_id'] = self.internet_gateway.id
+        config['route_table_id'] = self.route_table.id
         config['master_ebs_volume_num'] = self.opts.master_ebs_vol_num
         config['master_ebs_volume_size'] = self.opts.master_ebs_vol_size
         config['master_ebs_raid_level'] = self.opts.master_ebs_raid_level
@@ -865,7 +1048,6 @@ class Cluster(object):
         config['jupyter'] = self.opts.jupyter
         config['jupyter_port'] = 8899
         config['jupyter_password'] = self.opts.jupyter_password
-        # config['abtools_version'] = self.opts.abtools_version
         jstring = json.dumps(config)
         write_config_cmd = "sudo echo '{}' >> {}".format(jstring, config_file)
         self.run(self.master_instance, write_config_cmd)
@@ -878,13 +1060,22 @@ class Cluster(object):
         return pickle.loads(stdout)
 
 
+    def retrieve_cfg(self):
+        cfg_file = '/home/ubuntu/.abcloud_config'
+        read_cfg_cmd = "sudo cat '{}'".format(cfg_file)
+        stdout, _ = self.run(self.master_instance, read_cfg_cmd)
+        return json.loads(stdout)
+
+
 def configure_base_image(ip_address, user, identity_file, debug=False):
     # Initial configuration
-    init_cmd = 'sudo apt-get update --fix-missing \
-        && sudo apt-get install -y build-essential wget bzip2 \
+    init_cmd = 'sudo debconf-set-selections <<< "postfix postfix/mailname string your.hostname.com"'
+    init_cmd += ''' && sudo debconf-set-selections <<< "postfix postfix/main_mailer_type string 'Internet Site'"'''
+    init_cmd += ' && sudo apt-get update --fix-missing \
+        && sudo apt-get install -y build-essential wget bzip2 fail2ban htop default-jre \
         ca-certificates libglib2.0-0 libxext6 libsm6 libxrender1 pigz s3cmd git mercurial \
         subversion libtool automake zlib1g-dev libbz2-dev pkg-config muscle mafft cd-hit unzip \
-        libfontconfig1 \
+        libfontconfig1 lvm2 mdadm nfs-kernel-server\
         && sudo ln -s /usr/bin/cdhit /usr/bin/cd-hit \
         && sudo mkdir /tools \
         && sudo chmod 777 /tools'
@@ -893,18 +1084,26 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print('\n\nINITIAL CONFIGURATION')
         print(o)
         print(e)
+
     # Anaconda
+    # conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda2/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
+    #     && cd /tools \
+    #     && wget --quiet https://repo.continuum.io/archive/Anaconda2-4.0.0-Linux-x86_64.sh \
+    #     && /bin/bash ./Anaconda2-4.0.0-Linux-x86_64.sh -b -p /home/ubuntu/anaconda2 \
+    #     && rm /tools/Anaconda2-4.0.0-Linux-x86_64.sh \
+    #     && export PATH=/home/ubuntu/anaconda2/bin:$PATH"
     conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda2/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
         && cd /tools \
-        && wget --quiet https://repo.continuum.io/archive/Anaconda2-4.0.0-Linux-x86_64.sh \
-        && /bin/bash ./Anaconda2-4.0.0-Linux-x86_64.sh -b -p /home/ubuntu/anaconda2 \
-        && rm /tools/Anaconda2-4.0.0-Linux-x86_64.sh \
+        && wget --quiet https://repo.continuum.io/archive/Anaconda2-5.0.0.1-Linux-x86_64.sh \
+        && /bin/bash ./Anaconda2-5.0.0.1-Linux-x86_64.sh -b -p /home/ubuntu/anaconda2 \
+        && rm /tools/Anaconda2-5.0.0.1-Linux-x86_64.sh \
         && export PATH=/home/ubuntu/anaconda2/bin:$PATH"
     o, e = run_ssh(conda_cmd, ip_address, user, identity_file)
     if debug:
         print('\n\nANACONDA')
         print(o)
         print(e)
+
     # MongoDB
     mongo_cmd = 'sudo apt-key adv --keyserver ha.pool.sks-keyservers.net --recv-keys "DFFA3DCF326E302C4787673A01C4E7FAAAB2461C" \
         && sudo apt-key adv --keyserver ha.pool.sks-keyservers.net --recv-keys "42F3E95A2C4F08279C4960ADD68FA50FEA312927" \
@@ -926,6 +1125,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print('\n\nMONGODB')
         print(o)
         print(e)
+
     # PANDAseq
     panda_cmd = 'cd /tools \
         && git clone https://github.com/neufeld/pandaseq \
@@ -940,6 +1140,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print('\n\nPANDASEQ')
         print(o)
         print(e)
+
     # BaseSpace Python SDK
     bs_cmd = 'cd /tools \
         && git clone https://github.com/basespace/basespace-python-sdk \
@@ -950,6 +1151,18 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print('\n\nBASESPACE PYTHON SDK')
         print(o)
         print(e)
+
+    # USEARCH
+    usearch_cmd = 'cd /tools \
+        && wget http://burtonlab.s3.amazonaws.com/software/usearch \
+        && sudo chmod 777 usearch \
+        && sudo cp usearch /usr/local/bin/'
+    o, e = run_ssh(usearch_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nUSEARCH')
+        print(o)
+        print(e)
+
     # FASTQC
     fqc_cmd = 'cd /tools \
         && wget http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.5.zip \
@@ -960,6 +1173,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print('\n\nFASTQC')
         print(o)
         print(e)
+
     # cutadapt
     cut_cmd = '/home/ubuntu/anaconda2/bin/pip install cutadapt'
     o, e = run_ssh(cut_cmd, ip_address, user, identity_file)
@@ -967,6 +1181,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print('\n\nCUTADAPT')
         print(o)
         print(e)
+
     # Sickle
     sickle_cmd = 'cd /tools \
         && wget http://zlib.net/zlib128.zip \
@@ -985,11 +1200,20 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print('\n\nSICKLE')
         print(o)
         print(e)
+
     # AbStar
     abstar_cmd = '/home/ubuntu/anaconda2/bin/pip install abstar'
     o, e = run_ssh(abstar_cmd, ip_address, user, identity_file)
     if debug:
         print('\n\nABSTAR')
+        print(o)
+        print(e)
+
+    # celery[redis]
+    celery_cmd = '/home/ubuntu/anaconda2/bin/pip install celery[redis]'
+    o, e = run_ssh(celery_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nCELERY[REDIS]')
         print(o)
         print(e)
 
@@ -1028,8 +1252,10 @@ def retrieve_cluster(cluster_name, opts):
     master_instances = ec2utils.get_instances(ec2, master_group_name)
     master_instances = [i for i in master_instances if i.state['Name'] == 'running']
     if len(master_instances) == 0:
-        return Cluster(cluster_name)
-    c = Cluster(cluster_name, opts=opts)
+        return Cluster(cluster_name, opts=opts)
+    vpc_id = master_instances[0].vpc_id
+    vpc = [v for v in ec2.vpcs.all() if v.id == vpc_id][0]
+    c = Cluster(cluster_name, opts=opts, vpc=vpc)
     c.load()
     return c
 
@@ -1050,7 +1276,13 @@ def print_groups_info(groups):
 
 def print_cluster_info(name, cluster):
     cname_string = '     {}     '.format(name)
-    # cfg = get_config(masters[0], opts)
+    try:
+        # cluster.opts = cluster.retrieve_opts(cluster.master_instance)
+        cfg = cluster.retrieve_cfg()
+    except:
+        print('')
+        print(traceback.format_exc())
+        return
     print('\n{}'.format(cname_string))
     print('=' * len(cname_string))
     if len(cluster.master) + len(cluster.workers) == 0:
@@ -1074,25 +1306,39 @@ def print_cluster_info(name, cluster):
             print('number of worker instances: {}'.format(wcount))
             print('worker instance type: {}'.format(wtype))
             # print('worker instance IP address{}: {}'.format(wplural, wips))
-        if cluster.opts.basespace_credentials:
+        # if cluster.opts.basespace_credentials:
+        if cfg['basespace']:
             print('\nBaseSpace credentials have been uploaded')
         elif check_for_basespace_credentials(cluster):
             print('\nBaseSpace credentials have been uploaded')
-        if cluster.opts.mongodb:
+        # if cluster.opts.mongodb:
+        if cfg['mongo']:
             print('\nMaster node is configured as a MongoDB server.')
-            print('MongoDB database is located at: {}'.format(os.path.join(cluster.opts.master_ebs_raid_dir, 'db')))
-        if cluster.opts.jupyter:
+            # print('MongoDB database is located at: {}'.format(os.path.join(cluster.opts.master_ebs_raid_dir, 'db')))
+            print('MongoDB database is located at: {}'.format(os.path.join(cfg['master_ebs_raid_dir'], 'db')))
+        # if cluster.opts.jupyter:
+        if cfg['jupyter']:
             jupyter_location = 'http://{}:8899'.format(cluster.master_instance.public_ip_address)
             print('\nMaster node is configured as a Jupyter notebook server.')
             print("Jupyter notebook URL: {}".format(jupyter_location))
             print('Jupyter password: {}'.format(cluster.opts.jupyter_password))
-        if cluster.opts.celery and cluster.workers:
+        # if cluster.opts.celery and cluster.workers:
+        if cfg['celery'] and cluster.workers:
             total, running = get_celery_info(cluster)
             print('\nCluster is configured to use Celery.')
             print('Number of Celery workers: {}'.format(total))
             print("Workers reporting 'OK' status: {}".format(running))
             print('Flower is available at: http://{}:5555'.format(cluster.master_instance.public_ip_address))
     print('')
+
+
+def get_config(ip_address, user, identity_file):
+    get_config_cmd = 'cat /home/ubuntu/.abcloud_config'
+    cfg_string = run_ssh(get_config_cmd, ip_address, user, identity_file)[0]
+    if cfg_string.strip():
+        cfg = json.loads(cfg_string)
+        return cfg
+    return None
 
 
 def check_for_basespace_credentials(cluster):

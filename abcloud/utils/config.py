@@ -122,9 +122,13 @@ WORKER_TCP_PORT_RANGES = [(22, 22),  # SSH
 
 
 UBUNTU_AMI_MAP = {
-    'us-east-1': 'ami-af5a4cc5',
-    'us-west-1': 'ami-8a5529ea',
-    'us-west-2': 'ami-50946030'
+    # 'us-east-1': 'ami-af5a4cc5',
+    # 'us-west-1': 'ami-8a5529ea',
+    # 'us-west-2': 'ami-50946030'
+    'us-east-1': 'ami-bcdc16c6',
+    'us-east-2': 'ami-49426e2c',
+    'us-west-1': 'ami-1b17257b',
+    'us-west-2': 'ami-19e92861'
 }
 
 
