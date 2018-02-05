@@ -34,13 +34,94 @@ from abcloud.utils import progbar
 from abcloud.utils.config import *
 
 
+def get_or_make_vpc(ec2, ec2c, cluster_name, vpc_id, cidr_block):
+    # TODO: Need to rework this. We're only allowed 5 VPCs, so it's not the best idea
+    # to create a new VPC for each cluster. Instead, I should create a VPC only if there
+    # isn't sufficient address space in all existing VPCs. This also means that I should
+    # change the default subnet size (currently 10.0.0.0/16) to something more reasonable (otherwise
+    # each new subnet will consume all of the address space in a VPC)
+    if vpc_id is not None:
+        print('\nSearching for VPC {}...'.format(vpc_id))
+        vpc_ids = [v.id for v in ec2.vpcs.all()]
+        if vpc_id in vpc_ids:
+            print('Found VPC {}.'.format(vpc_id))
+            return [v for v in ec2.vpcs.all() if v.id == vpc_id][0]
+        else:
+            print('VPC {} was not found.'.format(vpc_id))
+    # check for an existing VPC
+    all_vpcs = list(ec2.vpcs.all())
+    cluster_vpcs = []
+    for vpc in all_vpcs:
+        if vpc.tags is None:
+            continue
+        tags = [tag['Value'] for tag in vpc.tags if tag['Key'] == 'Name' and tag['Value'] == cluster_name]
+        if tags:
+            cluster_vpcs.append(vpc)
+    # if a VPC already exists, use that one
+    if cluster_vpcs:
+        vpc = cluster_vpcs[0]
+        print('\nFound an existing VPC: {}'.format(vpc.id))
+    # if a VPC doesn't exist, create a new one
+    else:
+        print('\nCreating a new VPC: ', end='')
+        vpc = ec2.create_vpc(CidrBlock=cidr_block)
+        # waiter = self.ec2c.get_waiter('vpc_available')
+        # vpc_waiter.wait(VpcIds=[vpc.id])
+        print(vpc.id)
+        print('Naming the VPC')
+        vpc.create_tags(Tags=[{'Key': 'Name', 'Value': cluster_name}])
+    return vpc
+
+
+def get_or_make_internet_gateway(ec2, vpc):
+    print('\nLooking for an internet gateway in VPC {}'.format(vpc.id))
+    igws = list(vpc.internet_gateways.all())
+    # print('Existing gateways: {}'.format(', '.join([i.id for i in igws])))
+    if igws:
+        print('An gateway already exists and is attached to your VPC.')
+        return igws[0]
+    print('Creating an internet gateway: ', end='')
+    igw = ec2.create_internet_gateway()
+    print(igw.id)
+    print('Attaching internet gateway to VPC')
+    igw.attach_to_vpc(VpcId=vpc.id)
+    return igw
+
+
+def create_subnet(ec2, vpc, cidr_block):
+   # check to make sure there's VPC address space to add the desired subnet
+    vpc_addresses = 10**(32 - int(vpc.cidr_block.split('/')[1]))
+    subnet_addresses = 0
+    existing_cidrs = []
+    for subnet in vpc.subnets.all():
+        existing_cidrs.append(subnet.cidr_block)
+        subnet_addresses += 10**(32 - int(subnet.cidr_block.split('/')[1]))
+    available_addresses = vpc_addresses - subnet_addresses
+    if available_addresses < 10**(32 - int(cidr_block.split('/')[1])):
+        print('\n\nERROR: VPC does not have enough available addresses for a subnet \
+            of the requested size ({})\n\n'.format(cidr_block))
+        sys.exit()
+    # check to see if the requested CIDR block is already in use
+    if cidr_block in existing_cidrs:
+        requested_cidr = cidr_block
+        cidr_prefix = '.'.join(cidr_block.split('.')[:2]) + '.'
+        cidr_suffix = '.' + cidr_block.split('.')[3]
+        while cidr_block in existing_cidrs:
+            cidr_counter = int(cidr_block.split('.')[2])
+            cidr_block = cidr_prefix + str(cidr_counter + 1) + cidr_suffix
+        print('Requested subnet CIDR block ({}) is already being used.'.format(requested_cidr))
+        print('Using {} instead.'.format(cidr_block))
+    # create the subnet
+    return ec2.create_subnet(VpcId=vpc.id, CidrBlock=cidr_block)
+
+
 def get_or_make_group(ec2, name, vpc_id=None, quiet=False):
     """
     Get the EC2 security group of the given name,
     creating it if it doesn't exist
     """
     groups = ec2.security_groups.all()
-    groups = [g for g in groups if g.group_name == name]
+    groups = [g for g in groups if g.group_name == name and g.vpc_id == vpc_id]
     if len(groups) > 0:
         return groups[0]
     else:
@@ -71,10 +152,15 @@ def authorize_ports(security_group, protocol, port_ranges, authorized_address):
             CidrIp=authorized_address)
 
 
-def intracluster_auth(master, worker):
+def intracluster_auth(cluster):
+    master = cluster.master_group
+    worker = cluster.worker_group
     for group in [master, worker]:
-        for src_group in [master.group_name, worker.group_name]:
-            group.authorize_ingress(SourceSecurityGroupName=src_group)
+        for src_group in [master, worker]:
+            # group.authorize_ingress(SourceSecurityGroupName=src_group)
+            group.authorize_ingress(IpPermissions=[{'IpProtocol': '-1',
+                                                    'UserIdGroupPairs': [{'VpcId': cluster.vpc.id,
+                                                                          'GroupId': src_group.id}]}])
 
 
 def get_existing_instances(ec2, cluster_name, quiet=False):
@@ -83,6 +169,14 @@ def get_existing_instances(ec2, cluster_name, quiet=False):
     master_instances = get_instances(ec2, '@abcloud-' + cluster_name + '-master')
     worker_instances = get_instances(ec2, '@abcloud-' + cluster_name + '-worker')
     return master_instances, worker_instances
+
+
+def retrieve_existing_security_group(ec2, name):
+    groups = ec2.security_groups.all()
+    groups = [g for g in groups if g.group_name == name]
+    if len(groups) == 0:
+        return None
+    return groups[0]
 
 
 def get_availability_zones(ec2c):
@@ -95,13 +189,13 @@ def get_availability_zones(ec2c):
 
 
 def request_spot_instance(ec2c, group_name=None, price=None, num=1, ami=None,
-        key_pair=None, instance_type=None, availability_zone=None,
-        block_device_mappings=None):
+        key_pair=None, subnet_id=None, instance_type=None, availability_zone=None,
+        block_device_mappings=None, security_group_ids=None):
     '''
     docstring
     '''
     # check required kwargs
-    reqs = [r is not None for r in [group_name, price, ami, key_pair, instance_type]]
+    reqs = [r is not None for r in [security_group_ids, price, ami, key_pair, instance_type]]
     if not all(reqs):
         err = 'ERROR: The following fields are required to request a spot instance:\n'
         err += 'group_name, price, ami, key_pair and instance_type'
@@ -110,8 +204,10 @@ def request_spot_instance(ec2c, group_name=None, price=None, num=1, ami=None,
     # build launch specification
     launch_spec = {'ImageId': ami,
                    'KeyName': key_pair,
-                   'SecurityGroups': [group_name],
-                   'InstanceType': instance_type}
+                   # 'SecurityGroups': [group_name],
+                   'InstanceType': instance_type,
+                   'SubnetId': subnet_id,
+                   'SecurityGroupIds': security_group_ids}
     if availability_zone:
         launch_spec['Placement'] = {'AvailabilityZone': availability_zone}
     if block_device_mappings:
@@ -135,15 +231,16 @@ def wait_for_instance_state(ec2c, instance_ids, state):
     states = [i['State']['Name'] for i in instances]
     pending = [s != state for s in states]
     while any(pending):
-        total = len(instances)
-        finished = total - sum(pending)
-        progbar.progress_bar(finished, total, start)
+        # total = len(instances)
+        # finished = total - sum(pending)
+        finished = len(instances) - sum(pending)
+        progbar.progress_bar(finished, len(instances), start)
         time.sleep(15)
         response = ec2c.describe_instances(InstanceIds=instance_ids)
         instances = [i for r in response['Reservations'] for i in r['Instances']]
         states = [i['State']['Name'] for i in instances]
         pending = [s != state for s in states]
-    progbar.progress_bar(total, total, start)
+    progbar.progress_bar(len(instances), len(instances), start)
 
 
 def get_num_disks(instance_type):
