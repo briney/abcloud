@@ -23,8 +23,6 @@
 #
 
 
-from __future__ import print_function
-
 import cPickle as pickle
 from datetime import datetime
 import json
@@ -45,6 +43,9 @@ from abcloud.utils import ec2utils, progbar
 from abcloud.utils.config import *
 
 from abutils.utils.jobs import monitor_mp_jobs
+
+if sys.version_info[0] == 2:
+    from __future__ import print_function
 
 
 class Cluster(object):
@@ -935,14 +936,14 @@ class Cluster(object):
             && sudo chmod 777 /var/redis \
             && sudo mkdir /var/redis/6379 \
             && printf '{}' | sudo tee /etc/redis/6379.conf \
-            && /home/ubuntu/anaconda2/bin/redis-server /etc/redis/6379.conf".format(redis_conf)
+            && /home/ubuntu/anaconda3/bin/redis-server /etc/redis/6379.conf".format(redis_conf)
         self.run(instance, redis_cmd)
 
 
     def start_celery_workers(self, instances):
         print('')
         print('Starting Celery worker processes:')
-        celery_cmd = '/home/ubuntu/anaconda2/bin/celery '
+        celery_cmd = '/home/ubuntu/anaconda3/bin/celery '
         celery_cmd += '-A abstar.utils.queue.celery worker -l info --detach'
         run_ssh_multi(celery_cmd,
                       self.worker_instances,
@@ -953,8 +954,8 @@ class Cluster(object):
     def start_flower(self):
         print('')
         print('Starting Flower server on master...')
-        flower_cmd = '''/home/ubuntu/anaconda2/bin/pip install flower \
-            && screen -d -m bash -c "/home/ubuntu/anaconda2/bin/flower -A abstar.utils.queue.celery"'''
+        flower_cmd = '''/home/ubuntu/anaconda3/bin/pip install flower \
+            && screen -d -m bash -c "/home/ubuntu/anaconda3/bin/flower -A abstar.utils.queue.celery"'''
         self.run(self.master_instance, flower_cmd)
         print('Flower URL: http://{}:5555'.format(self.master_instance.public_ip_address))
 
@@ -967,11 +968,11 @@ class Cluster(object):
         # hash/salt the Jupyter login password
         sha1_py = 'from notebook.auth import passwd; print passwd("{}")'.format(
             self.opts.jupyter_password)
-        sha1_cmd = "/home/ubuntu/anaconda2/bin/python -c '{}'".format(sha1_py)
+        sha1_cmd = "/home/ubuntu/anaconda3/bin/python -c '{}'".format(sha1_py)
         passwd = self.run(self.master_instance, sha1_cmd)[0].strip()
 
         # make a new Jupyter profile and directory; edit the config
-        create_profile_cmd = '/home/ubuntu/anaconda2/bin/jupyter notebook --generate-config'
+        create_profile_cmd = '/home/ubuntu/anaconda3/bin/jupyter notebook --generate-config'
         self.run(self.master_instance, create_profile_cmd)
         if self.opts.master_ebs_vol_num > 0:
             notebook_dir = os.path.join(self.opts.master_ebs_raid_dir, 'jupyter')
@@ -989,7 +990,7 @@ class Cluster(object):
         self.run(self.master_instance, profile_config_cmd)
 
         # start a backgroud Jupyter instance
-        jupyter_start_cmd = "/home/ubuntu/anaconda2/bin/jupyter notebook --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
+        jupyter_start_cmd = "/home/ubuntu/anaconda3/bin/jupyter notebook --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
         self.run(self.master_instance, jupyter_start_cmd)
         print("Jupyter notebook URL: http://{}:{}".format(self.master_instance.public_ip_address, 8899))
         print("Password for the Jupyter notebook is '{}'".format(self.opts.jupyter_password))
@@ -1075,7 +1076,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo apt-get install -y build-essential wget bzip2 fail2ban htop default-jre \
         ca-certificates libglib2.0-0 libxext6 libsm6 libxrender1 pigz s3cmd git mercurial \
         subversion libtool automake zlib1g-dev libbz2-dev pkg-config muscle mafft cd-hit unzip \
-        libfontconfig1 lvm2 mdadm nfs-kernel-server\
+        libfontconfig1 lvm2 mdadm nfs-kernel-server ijulia irkernel ijavascript \
         && sudo ln -s /usr/bin/cdhit /usr/bin/cd-hit \
         && sudo mkdir /tools \
         && sudo chmod 777 /tools'
@@ -1092,12 +1093,13 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
     #     && /bin/bash ./Anaconda2-4.0.0-Linux-x86_64.sh -b -p /home/ubuntu/anaconda2 \
     #     && rm /tools/Anaconda2-4.0.0-Linux-x86_64.sh \
     #     && export PATH=/home/ubuntu/anaconda2/bin:$PATH"
-    conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda2/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
+    conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda3/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
         && cd /tools \
-        && wget --quiet https://repo.continuum.io/archive/Anaconda2-5.0.0.1-Linux-x86_64.sh \
-        && /bin/bash ./Anaconda2-5.0.0.1-Linux-x86_64.sh -b -p /home/ubuntu/anaconda2 \
-        && rm /tools/Anaconda2-5.0.0.1-Linux-x86_64.sh \
-        && export PATH=/home/ubuntu/anaconda2/bin:$PATH"
+        && wget --quiet https://repo.continuum.io/archive/Anaconda3-5.0.1-Linux-x86_64.sh \
+        && /bin/bash ./Anaconda3-5.0.1-Linux-x86_64.sh -b -p /home/ubuntu/anaconda3 \
+        && rm /tools/Anaconda3-5.0.1-Linux-x86_64.sh \
+        && export PATH=/home/ubuntu/anaconda3/bin:$PATH \
+        && sed -i 's/Qt4Agg/Qt5Agg/g' /home/ubuntu/.matplotlib/matplotlibrc"
     o, e = run_ssh(conda_cmd, ip_address, user, identity_file)
     if debug:
         print('\n\nANACONDA')
@@ -1145,7 +1147,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
     bs_cmd = 'cd /tools \
         && git clone https://github.com/basespace/basespace-python-sdk \
         && cd basespace-python-sdk/src \
-        && /home/ubuntu/anaconda2/bin/python setup.py install'
+        && /home/ubuntu/anaconda3/bin/python setup.py install'
     o, e = run_ssh(bs_cmd, ip_address, user, identity_file)
     if debug:
         print('\n\nBASESPACE PYTHON SDK')
@@ -1164,19 +1166,19 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(e)
 
     # FASTQC
-    fqc_cmd = 'cd /tools \
+    fastqc_cmd = 'cd /tools \
         && wget http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.5.zip \
         && unzip fastqc_v0.11.5.zip \
         && sudo ln -s FastQC/fastqc /usr/local/bin/fastqc'
-    o, e = run_ssh(fqc_cmd, ip_address, user, identity_file)
+    o, e = run_ssh(fastqc_cmd, ip_address, user, identity_file)
     if debug:
         print('\n\nFASTQC')
         print(o)
         print(e)
 
     # cutadapt
-    cut_cmd = '/home/ubuntu/anaconda2/bin/pip install cutadapt'
-    o, e = run_ssh(cut_cmd, ip_address, user, identity_file)
+    cutadapt_cmd = '/home/ubuntu/anaconda3/bin/pip install cutadapt'
+    o, e = run_ssh(cutadapt_cmd, ip_address, user, identity_file)
     if debug:
         print('\n\nCUTADAPT')
         print(o)
@@ -1202,7 +1204,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(e)
 
     # AbStar
-    abstar_cmd = '/home/ubuntu/anaconda2/bin/pip install abstar'
+    abstar_cmd = '/home/ubuntu/anaconda3/bin/pip install abstar'
     o, e = run_ssh(abstar_cmd, ip_address, user, identity_file)
     if debug:
         print('\n\nABSTAR')
@@ -1210,7 +1212,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(e)
 
     # celery[redis]
-    celery_cmd = '/home/ubuntu/anaconda2/bin/pip install celery[redis]'
+    celery_cmd = '/home/ubuntu/anaconda3/bin/pip install celery[redis]'
     o, e = run_ssh(celery_cmd, ip_address, user, identity_file)
     if debug:
         print('\n\nCELERY[REDIS]')
@@ -1351,7 +1353,7 @@ def check_for_basespace_credentials(cluster):
 
 
 def get_celery_info(cluster):
-    celery_info_cmd = '/home/ubuntu/anaconda2/bin/celery -A abstar.utils.queue.celery status'
+    celery_info_cmd = '/home/ubuntu/anaconda3/bin/celery -A abstar.utils.queue.celery status'
     info = cluster.run(cluster.master_instance, celery_info_cmd)[0]
     total = 0
     running = 0
