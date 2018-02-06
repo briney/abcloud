@@ -176,7 +176,7 @@ def parse_args(print_help=False):
         help="When destroying a cluster, delete the security groups that were created")
     parser.add_argument("--use-existing-master", action="store_true", default=False,
         help="Launch fresh workers, but use an existing stopped master if possible")
-    parser.add_argument("--jupyter", action="store_true", default=False,
+    parser.add_argument("--no-jupyter", action="store_false", dest='jupyter', default=True,
         help="Set up a persistent Jupyter notebook server on the master node. \
         Jupyter notebook server will be launched in <master-ebs-raid-dir>/jupyter if \
         EBS volumes are attached, or in /home/ubuntu/jupyter if not. \
