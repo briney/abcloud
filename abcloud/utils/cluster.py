@@ -44,7 +44,7 @@ import paramiko
 from abcloud.utils import ec2utils, progbar
 from abcloud.utils.config import *
 
-from abtools.jobs import monitor_mp_jobs
+from abutils.utils.jobs import monitor_mp_jobs
 
 
 class Cluster(object):

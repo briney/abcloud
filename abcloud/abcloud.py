@@ -54,6 +54,9 @@ from utils import cluster, list_instances
 from utils.config import *
 
 
+__version__ = pkg_resources.require("abcloud")[0].version
+
+
 def parse_args(print_help=False):
     parser = argparse.ArgumentParser(
         prog="AbCloud",
@@ -238,6 +241,8 @@ def parse_args(print_help=False):
         "--private-ips", action="store_true", default=False,
         help="Use private IPs for instances rather than public if VPC/subnet \
         requires that.")
+    parser.add_argument('-v', '--version', action='version', \
+        version='abcloud {version}'.format(version=__version__))
     parser.add_argument(
         '-D', '--debug', dest='debug', action='store_true', default=False,
         help="If set, will run in debug mode.")
