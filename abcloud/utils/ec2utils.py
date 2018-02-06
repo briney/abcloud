@@ -23,15 +23,15 @@
 #
 
 
-from __future__ import print_function
+from __future__ import print_function, absolute_import
 
 from datetime import datetime
 import itertools
 import sys
 import time
 
-from abcloud.utils import progbar
-from abcloud.utils.config import *
+from . import progbar
+from .config import *
 
 
 def get_or_make_vpc(ec2, ec2c, cluster_name, vpc_id, cidr_block):

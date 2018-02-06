@@ -22,8 +22,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
+from __future__ import print_function, absolute_import
 
-import cPickle as pickle
 from datetime import datetime
 import json
 import multiprocessing as mp
@@ -39,13 +39,16 @@ import boto3
 
 import paramiko
 
-from abcloud.utils import ec2utils, progbar
-from abcloud.utils.config import *
+from . import ec2utils, progbar
+from .config import *
 
 from abutils.utils.jobs import monitor_mp_jobs
 
-if sys.version_info[0] == 2:
-    from __future__ import print_function
+if sys.version_info[0] > 2:
+    import pickle
+else:
+    import cPickle as pickle
+    
 
 
 class Cluster(object):
