@@ -51,7 +51,7 @@ import warnings
 
 import boto3
 
-from .utils import cluster, list_instances
+from .utils import cluster
 from .utils.config import *
 
 

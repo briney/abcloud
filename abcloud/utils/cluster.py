@@ -39,13 +39,15 @@ import boto3
 
 import paramiko
 
-from . import ec2utils, progbar
-from .config import *
-
+from abutils.utils import progbar 
 from abutils.utils.jobs import monitor_mp_jobs
+
+from . import ec2utils
+from .config import *
 
 if sys.version_info[0] > 2:
     import pickle
+    raw_input = input
 else:
     import cPickle as pickle
     
@@ -137,7 +139,9 @@ class Cluster(object):
             # check for an existing subnet
             all_subnets = list(self.ec2.subnets.all())
             cluster_subnets = []
+            existing_cidrs = []
             for subnet in all_subnets:
+                existing_cidrs.append(subnet.cidr_block)
                 if subnet.tags is None:
                     continue
                 tags = [tag['Value'] for tag in subnet.tags if tag['Key'] == 'Name' and tag['Value'] == self.name]
@@ -145,9 +149,19 @@ class Cluster(object):
                     cluster_subnets.append(subnet)
             # if a subnet already exists, use that one
             if cluster_subnets:
-                print('\nSubnet already exists for this cluster')
+                # print('\nSubnet already exists for this cluster')
                 self._subnet = cluster_subnets[0]
             else:
+                cidr_block = self.opts.subnet_cidr_block
+                if self.opts.subnet_cidr_block in existing_cidrs:
+                    requested_cidr = self.opts.subnet_cidr_block
+                    cidr_prefix = '.'.join(self.opts.subnet_cidr_block.split('.')[:2]) + '.'
+                    cidr_suffix = '.' + self.opts.subnet_cidr_block.split('.')[3]
+                    while self.opts.subnet_cidr_block in existing_cidrs:
+                        cidr_counter = int(self.opts.subnet_cidr_block.split('.')[2])
+                        self.opts.subnet_cidr_block = cidr_prefix + str(cidr_counter + 1) + cidr_suffix
+                    print('\nRequested subnet CIDR block ({}) is already being used.'.format(requested_cidr))
+                    print('Using {} instead.'.format(self.opts.subnet_cidr_block))
                 print('\nCreating a new subnet: ', end='')
                 self._subnet = self.ec2.create_subnet(VpcId=self.vpc.id,
                                                       CidrBlock=self.opts.subnet_cidr_block,
@@ -181,7 +195,7 @@ class Cluster(object):
                     cluster_route_tables.append(route_table)
             # if a route table already exists, use that one
             if cluster_route_tables:
-                print('Route table already exists for this cluster')
+                # print('Route table already exists for this cluster')
                 self._route_table = cluster_route_tables[0]
             else:
                 print('Creating a new route table: ', end='')
@@ -333,15 +347,21 @@ class Cluster(object):
         self.worker_instances = workers
 
         # get master instance information
-        self.master_name = [d['Value'] for d in self.master_instance.tags if 'Name' in d.values()][0]
+        if self.master_instance.tags is not None:
+            self.master_name = [d['Value'] for d in self.master_instance.tags if 'Name' in d.values()][0]
+        else:
+            self.master_name = 'master'
         self.master = {self.master_name: self.master_instance}
 
         # get worker instance information
         self.workers = {}
-        for i in self.worker_instances:
-            worker_name = [d['Value'] for d in i.tags if 'Name' in d.values()][0]
+        for count, i in enumerate(self.worker_instances):
+            if i.tags is not None:
+                worker_name = [d['Value'] for d in i.tags if 'Name' in d.values()][0]
+            else:
+                worker_name = 'node{}'.format(count)
             self.workers[worker_name] = i
-        self.worker_names = sorted(self.workers.keys())
+        self.worker_names = sorted(list(self.workers.keys()))
 
 
     def launch(self):
@@ -572,7 +592,7 @@ class Cluster(object):
             print('Subnet state: {}'.format(subnet.state))
             time.wait(10)
             subnet_ids = [s.id for s in vpc.subnets.all()]
-            print(', '.join(subnet_ids))
+            # print(', '.join(subnet_ids))
         # delete route table
         print('Deleting route table...')
         self.route_table.delete()
@@ -594,7 +614,7 @@ class Cluster(object):
 
 
     def terminate(self):
-        all_instances = self.master.items() + self.workers.items()
+        all_instances = list(self.master.items()) + list(self.workers.items())
         if any(all_instances):
             for name, instance in all_instances:
                 print("> {} ({})".format(name, instance.public_dns_name))
@@ -622,7 +642,7 @@ class Cluster(object):
 
     def ssh(self, node_name=None):
         if node_name is None or node_name.lower() == 'master':
-            node_name = self.master.keys()[0]
+            node_name = list(self.master.keys())[0]
             instance = self.master[node_name]
         else:
             if node_name not in self.workers:
@@ -737,7 +757,7 @@ class Cluster(object):
     def configure(self):
         instances = [self.master_instance] + self.worker_instances
         instance_lookup = dict(self.master, **self.workers)
-        instance_names = sorted(instance_lookup.keys())
+        instance_names = sorted(list(instance_lookup.keys()))
 
         # build base image
         print('')
@@ -969,7 +989,7 @@ class Cluster(object):
             self.master_name))
 
         # hash/salt the Jupyter login password
-        sha1_py = 'from notebook.auth import passwd; print passwd("{}")'.format(
+        sha1_py = 'from notebook.auth import passwd; print(passwd("{}"))'.format(
             self.opts.jupyter_password)
         sha1_cmd = "/home/ubuntu/anaconda3/bin/python -c '{}'".format(sha1_py)
         passwd = self.run(self.master_instance, sha1_cmd)[0].strip()
@@ -1079,7 +1099,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo apt-get install -y build-essential wget bzip2 fail2ban htop default-jre \
         ca-certificates libglib2.0-0 libxext6 libsm6 libxrender1 pigz s3cmd git mercurial \
         subversion libtool automake zlib1g-dev libbz2-dev pkg-config muscle mafft cd-hit unzip \
-        libfontconfig1 lvm2 mdadm nfs-kernel-server ijulia irkernel ijavascript \
+        libfontconfig1 lvm2 mdadm nfs-kernel-server \
         && sudo ln -s /usr/bin/cdhit /usr/bin/cd-hit \
         && sudo mkdir /tools \
         && sudo chmod 777 /tools'
@@ -1102,7 +1122,10 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && /bin/bash ./Anaconda3-5.0.1-Linux-x86_64.sh -b -p /home/ubuntu/anaconda3 \
         && rm /tools/Anaconda3-5.0.1-Linux-x86_64.sh \
         && export PATH=/home/ubuntu/anaconda3/bin:$PATH \
-        && sed -i 's/Qt4Agg/Qt5Agg/g' /home/ubuntu/.matplotlib/matplotlibrc"
+        && sed -i 's/Qt4Agg/Qt5Agg/g' /home/ubuntu/.matplotlib/matplotlibrc \
+        && sudo add-apt-repository -y ppa:chronitis/jupyter \
+        && sudo apt-get update --fix-missing \
+        && sudo apt-get install -y ijulia irkernel ijavascript"
     o, e = run_ssh(conda_cmd, ip_address, user, identity_file)
     if debug:
         print('\n\nANACONDA')

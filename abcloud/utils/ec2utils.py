@@ -30,7 +30,8 @@ import itertools
 import sys
 import time
 
-from . import progbar
+from abutils.utils import progbar
+
 from .config import *
 
 
@@ -102,6 +103,7 @@ def create_subnet(ec2, vpc, cidr_block):
             of the requested size ({})\n\n'.format(cidr_block))
         sys.exit()
     # check to see if the requested CIDR block is already in use
+    print(existing_cidrs)
     if cidr_block in existing_cidrs:
         requested_cidr = cidr_block
         cidr_prefix = '.'.join(cidr_block.split('.')[:2]) + '.'
