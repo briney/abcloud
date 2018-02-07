@@ -1201,10 +1201,14 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(e)
 
     # BaseSpace Python SDK
+    if sys.version_info[0] > 2:
+        basespace_url = 'https://github.com/briney/basespace-python-sdk'
+    else:
+        basespace_url = 'https://github.com/basespace/basespace-python-sdk'
     bs_cmd = 'cd /tools \
-        && git clone https://github.com/basespace/basespace-python-sdk \
+        && git clone {} \
         && cd basespace-python-sdk/src \
-        && /home/ubuntu/anaconda3/bin/python setup.py install'
+        && /home/ubuntu/anaconda3/bin/python setup.py install'.format(basespace_url)
     o, e = run_ssh(bs_cmd, ip_address, user, identity_file)
     if debug:
         if sys.version_info[0] > 2:
