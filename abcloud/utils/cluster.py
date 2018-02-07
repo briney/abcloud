@@ -601,7 +601,7 @@ class Cluster(object):
         if self.vpc.subnets.all():
             print('Additional subnets exist within VPC {}, so the VPC and internet gateway will not be deleted.'.format(self.vpc.id))
             subnet_ids = [s.id for s in self.vpc.subnets.all()]
-            print(', '.join(subnet_ids))
+            # print(', '.join(subnet_ids))
         else:
             # delete internet gateway
             print('Deleting internet gateway...')
@@ -614,6 +614,12 @@ class Cluster(object):
 
 
     def terminate(self):
+        terminate_string = 'TERMINATING CLUSTER: {}'.format(self.name)
+        print('')
+        print('-' * (len(terminate_string) + 4))
+        print('  ' + terminate_string)
+        print('-' * (len(terminate_string) + 4))
+        print('')
         all_instances = list(self.master.items()) + list(self.workers.items())
         if any(all_instances):
             for name, instance in all_instances:
@@ -992,7 +998,11 @@ class Cluster(object):
         sha1_py = 'from notebook.auth import passwd; print(passwd("{}"))'.format(
             self.opts.jupyter_password)
         sha1_cmd = "/home/ubuntu/anaconda3/bin/python -c '{}'".format(sha1_py)
-        passwd = self.run(self.master_instance, sha1_cmd)[0].strip()
+        raw_passwd = self.run(self.master_instance, sha1_cmd)[0].strip()
+        if sys.version_info[0] > 2:
+            passwd = raw_passwd.decode('utf-8')
+        else:
+            passwd = raw_passwd
 
         # make a new Jupyter profile and directory; edit the config
         create_profile_cmd = '/home/ubuntu/anaconda3/bin/jupyter notebook --generate-config'
@@ -1092,6 +1102,22 @@ class Cluster(object):
 
 
 def configure_base_image(ip_address, user, identity_file, debug=False):
+    # fix hostname mapping
+    hostname_cmd = 'echo "$(cat /etc/hostname)"'
+    o, e = run_ssh(hostname_cmd, ip_address, user, identity_file)
+    if sys.version_info[0] > 2:
+        o = o.decode('utf-8')
+    hostname = o.strip()
+    update_hosts_cmd = "sudo sed -i 's/127.0.0.1 localhost/127.0.0.1 localhost {}/g' /etc/hosts".format(hostname)
+    o, e = run_ssh(update_hosts_cmd, ip_address, user, identity_file)
+    if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
+        print('\n\nFIX HOSTNAME MAPPING')
+        print(o)
+        print(e)
+
     # Initial configuration
     init_cmd = 'sudo debconf-set-selections <<< "postfix postfix/mailname string your.hostname.com"'
     init_cmd += ''' && sudo debconf-set-selections <<< "postfix postfix/main_mailer_type string 'Internet Site'"'''
@@ -1105,29 +1131,28 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo chmod 777 /tools'
     o, e = run_ssh(init_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nINITIAL CONFIGURATION')
         print(o)
         print(e)
 
     # Anaconda
-    # conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda2/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
-    #     && cd /tools \
-    #     && wget --quiet https://repo.continuum.io/archive/Anaconda2-4.0.0-Linux-x86_64.sh \
-    #     && /bin/bash ./Anaconda2-4.0.0-Linux-x86_64.sh -b -p /home/ubuntu/anaconda2 \
-    #     && rm /tools/Anaconda2-4.0.0-Linux-x86_64.sh \
-    #     && export PATH=/home/ubuntu/anaconda2/bin:$PATH"
     conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda3/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
         && cd /tools \
         && wget --quiet https://repo.continuum.io/archive/Anaconda3-5.0.1-Linux-x86_64.sh \
         && /bin/bash ./Anaconda3-5.0.1-Linux-x86_64.sh -b -p /home/ubuntu/anaconda3 \
         && rm /tools/Anaconda3-5.0.1-Linux-x86_64.sh \
         && export PATH=/home/ubuntu/anaconda3/bin:$PATH \
-        && sed -i 's/Qt4Agg/Qt5Agg/g' /home/ubuntu/.matplotlib/matplotlibrc \
         && sudo add-apt-repository -y ppa:chronitis/jupyter \
         && sudo apt-get update --fix-missing \
         && sudo apt-get install -y ijulia irkernel ijavascript"
     o, e = run_ssh(conda_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nANACONDA')
         print(o)
         print(e)
@@ -1150,6 +1175,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo mv /etc/mongod.conf /etc/mongod.conf.orig'
     o, e = run_ssh(mongo_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nMONGODB')
         print(o)
         print(e)
@@ -1165,6 +1193,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo ldconfig'
     o, e = run_ssh(panda_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nPANDASEQ')
         print(o)
         print(e)
@@ -1176,6 +1207,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && /home/ubuntu/anaconda3/bin/python setup.py install'
     o, e = run_ssh(bs_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nBASESPACE PYTHON SDK')
         print(o)
         print(e)
@@ -1187,6 +1221,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo cp usearch /usr/local/bin/'
     o, e = run_ssh(usearch_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nUSEARCH')
         print(o)
         print(e)
@@ -1198,6 +1235,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo ln -s FastQC/fastqc /usr/local/bin/fastqc'
     o, e = run_ssh(fastqc_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nFASTQC')
         print(o)
         print(e)
@@ -1206,6 +1246,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
     cutadapt_cmd = '/home/ubuntu/anaconda3/bin/pip install cutadapt'
     o, e = run_ssh(cutadapt_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nCUTADAPT')
         print(o)
         print(e)
@@ -1225,6 +1268,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo ln -s ./sickle /usr/local/bin/sickle'
     o, e = run_ssh(sickle_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nSICKLE')
         print(o)
         print(e)
@@ -1233,6 +1279,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
     abstar_cmd = '/home/ubuntu/anaconda3/bin/pip install abstar'
     o, e = run_ssh(abstar_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nABSTAR')
         print(o)
         print(e)
@@ -1241,6 +1290,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
     celery_cmd = '/home/ubuntu/anaconda3/bin/pip install celery[redis]'
     o, e = run_ssh(celery_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nCELERY[REDIS]')
         print(o)
         print(e)
