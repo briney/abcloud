@@ -29,7 +29,7 @@ config = {
     'description': 'AbCloud',
     'author': 'Bryan Briney',
     'url': 'www.github.com/briney/abcloud/',
-    'download_url': 'www.github.com/briney/abcloud/',
+    'download_url': 'https://www.github.com/briney/abcloud',
     'author_email': 'briney@scripps.edu',
     'version': '0.1.1',
     'install_requires': install_requires,
