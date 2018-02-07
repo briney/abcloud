@@ -31,7 +31,7 @@ config = {
     'url': 'www.github.com/briney/abcloud/',
     'download_url': 'www.github.com/briney/abcloud/',
     'author_email': 'briney@scripps.edu',
-    'version': '0.1.0',
+    'version': '0.1.1',
     'install_requires': install_requires,
     'packages': ['abcloud'],
     'scripts': ['bin/abcloud'],
