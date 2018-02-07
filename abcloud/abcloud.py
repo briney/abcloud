@@ -23,7 +23,7 @@
 #
 
 
-from __future__ import division, print_function, with_statement
+from __future__ import division, print_function, with_statement, absolute_import
 
 import argparse
 import codecs
@@ -35,6 +35,7 @@ import logging
 import os
 import os.path
 import pipes
+import pkg_resources
 import random
 import shutil
 import string
@@ -50,14 +51,17 @@ import warnings
 
 import boto3
 
-from utils import cluster, list_instances
-from utils.config import *
+from .utils import cluster
+from .utils.config import *
+
+
+__version__ = pkg_resources.require("abcloud")[0].version
 
 
 def parse_args(print_help=False):
     parser = argparse.ArgumentParser(
         prog="AbCloud",
-        version="AbCloud {v}".format(v=ABCLOUD_VERSION),
+        # version="AbCloud {v}".format(v=ABCLOUD_VERSION),
         usage="abcloud [options] <action> <cluster_name>\n\n<action> can be: launch, terminate, destroy, sshmaster, sshnode, put, get, or list")
 
     parser.add_argument('options', nargs='+',
@@ -173,7 +177,7 @@ def parse_args(print_help=False):
         help="When destroying a cluster, delete the security groups that were created")
     parser.add_argument("--use-existing-master", action="store_true", default=False,
         help="Launch fresh workers, but use an existing stopped master if possible")
-    parser.add_argument("--jupyter", action="store_true", default=False,
+    parser.add_argument("--no-jupyter", action="store_false", dest='jupyter', default=True,
         help="Set up a persistent Jupyter notebook server on the master node. \
         Jupyter notebook server will be launched in <master-ebs-raid-dir>/jupyter if \
         EBS volumes are attached, or in /home/ubuntu/jupyter if not. \
@@ -238,6 +242,8 @@ def parse_args(print_help=False):
         "--private-ips", action="store_true", default=False,
         help="Use private IPs for instances rather than public if VPC/subnet \
         requires that.")
+    parser.add_argument('-v', '--version', action='version', \
+        version='abcloud {version}'.format(version=__version__))
     parser.add_argument(
         '-D', '--debug', dest='debug', action='store_true', default=False,
         help="If set, will run in debug mode.")

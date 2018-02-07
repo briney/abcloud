@@ -22,10 +22,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
+from __future__ import print_function, absolute_import
 
-from __future__ import print_function
-
-import cPickle as pickle
 from datetime import datetime
 import json
 import multiprocessing as mp
@@ -41,10 +39,18 @@ import boto3
 
 import paramiko
 
-from abcloud.utils import ec2utils, progbar
-from abcloud.utils.config import *
+from abutils.utils import progbar 
+from abutils.utils.jobs import monitor_mp_jobs
 
-from abtools.jobs import monitor_mp_jobs
+from . import ec2utils
+from .config import *
+
+if sys.version_info[0] > 2:
+    import pickle
+    raw_input = input
+else:
+    import cPickle as pickle
+    
 
 
 class Cluster(object):
@@ -133,7 +139,9 @@ class Cluster(object):
             # check for an existing subnet
             all_subnets = list(self.ec2.subnets.all())
             cluster_subnets = []
+            existing_cidrs = []
             for subnet in all_subnets:
+                existing_cidrs.append(subnet.cidr_block)
                 if subnet.tags is None:
                     continue
                 tags = [tag['Value'] for tag in subnet.tags if tag['Key'] == 'Name' and tag['Value'] == self.name]
@@ -141,9 +149,19 @@ class Cluster(object):
                     cluster_subnets.append(subnet)
             # if a subnet already exists, use that one
             if cluster_subnets:
-                print('\nSubnet already exists for this cluster')
+                # print('\nSubnet already exists for this cluster')
                 self._subnet = cluster_subnets[0]
             else:
+                cidr_block = self.opts.subnet_cidr_block
+                if self.opts.subnet_cidr_block in existing_cidrs:
+                    requested_cidr = self.opts.subnet_cidr_block
+                    cidr_prefix = '.'.join(self.opts.subnet_cidr_block.split('.')[:2]) + '.'
+                    cidr_suffix = '.' + self.opts.subnet_cidr_block.split('.')[3]
+                    while self.opts.subnet_cidr_block in existing_cidrs:
+                        cidr_counter = int(self.opts.subnet_cidr_block.split('.')[2])
+                        self.opts.subnet_cidr_block = cidr_prefix + str(cidr_counter + 1) + cidr_suffix
+                    print('\nRequested subnet CIDR block ({}) is already being used.'.format(requested_cidr))
+                    print('Using {} instead.'.format(self.opts.subnet_cidr_block))
                 print('\nCreating a new subnet: ', end='')
                 self._subnet = self.ec2.create_subnet(VpcId=self.vpc.id,
                                                       CidrBlock=self.opts.subnet_cidr_block,
@@ -177,7 +195,7 @@ class Cluster(object):
                     cluster_route_tables.append(route_table)
             # if a route table already exists, use that one
             if cluster_route_tables:
-                print('Route table already exists for this cluster')
+                # print('Route table already exists for this cluster')
                 self._route_table = cluster_route_tables[0]
             else:
                 print('Creating a new route table: ', end='')
@@ -329,15 +347,21 @@ class Cluster(object):
         self.worker_instances = workers
 
         # get master instance information
-        self.master_name = [d['Value'] for d in self.master_instance.tags if 'Name' in d.values()][0]
+        if self.master_instance.tags is not None:
+            self.master_name = [d['Value'] for d in self.master_instance.tags if 'Name' in d.values()][0]
+        else:
+            self.master_name = 'master'
         self.master = {self.master_name: self.master_instance}
 
         # get worker instance information
         self.workers = {}
-        for i in self.worker_instances:
-            worker_name = [d['Value'] for d in i.tags if 'Name' in d.values()][0]
+        for count, i in enumerate(self.worker_instances):
+            if i.tags is not None:
+                worker_name = [d['Value'] for d in i.tags if 'Name' in d.values()][0]
+            else:
+                worker_name = 'node{}'.format(count)
             self.workers[worker_name] = i
-        self.worker_names = sorted(self.workers.keys())
+        self.worker_names = sorted(list(self.workers.keys()))
 
 
     def launch(self):
@@ -568,7 +592,7 @@ class Cluster(object):
             print('Subnet state: {}'.format(subnet.state))
             time.wait(10)
             subnet_ids = [s.id for s in vpc.subnets.all()]
-            print(', '.join(subnet_ids))
+            # print(', '.join(subnet_ids))
         # delete route table
         print('Deleting route table...')
         self.route_table.delete()
@@ -577,7 +601,7 @@ class Cluster(object):
         if self.vpc.subnets.all():
             print('Additional subnets exist within VPC {}, so the VPC and internet gateway will not be deleted.'.format(self.vpc.id))
             subnet_ids = [s.id for s in self.vpc.subnets.all()]
-            print(', '.join(subnet_ids))
+            # print(', '.join(subnet_ids))
         else:
             # delete internet gateway
             print('Deleting internet gateway...')
@@ -590,7 +614,13 @@ class Cluster(object):
 
 
     def terminate(self):
-        all_instances = self.master.items() + self.workers.items()
+        terminate_string = 'TERMINATING CLUSTER: {}'.format(self.name)
+        print('')
+        print('-' * (len(terminate_string) + 4))
+        print('  ' + terminate_string)
+        print('-' * (len(terminate_string) + 4))
+        print('')
+        all_instances = list(self.master.items()) + list(self.workers.items())
         if any(all_instances):
             for name, instance in all_instances:
                 print("> {} ({})".format(name, instance.public_dns_name))
@@ -618,7 +648,7 @@ class Cluster(object):
 
     def ssh(self, node_name=None):
         if node_name is None or node_name.lower() == 'master':
-            node_name = self.master.keys()[0]
+            node_name = list(self.master.keys())[0]
             instance = self.master[node_name]
         else:
             if node_name not in self.workers:
@@ -733,7 +763,7 @@ class Cluster(object):
     def configure(self):
         instances = [self.master_instance] + self.worker_instances
         instance_lookup = dict(self.master, **self.workers)
-        instance_names = sorted(instance_lookup.keys())
+        instance_names = sorted(list(instance_lookup.keys()))
 
         # build base image
         print('')
@@ -935,14 +965,14 @@ class Cluster(object):
             && sudo chmod 777 /var/redis \
             && sudo mkdir /var/redis/6379 \
             && printf '{}' | sudo tee /etc/redis/6379.conf \
-            && /home/ubuntu/anaconda2/bin/redis-server /etc/redis/6379.conf".format(redis_conf)
+            && /home/ubuntu/anaconda3/bin/redis-server /etc/redis/6379.conf".format(redis_conf)
         self.run(instance, redis_cmd)
 
 
     def start_celery_workers(self, instances):
         print('')
         print('Starting Celery worker processes:')
-        celery_cmd = '/home/ubuntu/anaconda2/bin/celery '
+        celery_cmd = '/home/ubuntu/anaconda3/bin/celery '
         celery_cmd += '-A abstar.utils.queue.celery worker -l info --detach'
         run_ssh_multi(celery_cmd,
                       self.worker_instances,
@@ -953,8 +983,8 @@ class Cluster(object):
     def start_flower(self):
         print('')
         print('Starting Flower server on master...')
-        flower_cmd = '''/home/ubuntu/anaconda2/bin/pip install flower \
-            && screen -d -m bash -c "/home/ubuntu/anaconda2/bin/flower -A abstar.utils.queue.celery"'''
+        flower_cmd = '''/home/ubuntu/anaconda3/bin/pip install flower \
+            && screen -d -m bash -c "/home/ubuntu/anaconda3/bin/flower -A abstar.utils.queue.celery"'''
         self.run(self.master_instance, flower_cmd)
         print('Flower URL: http://{}:5555'.format(self.master_instance.public_ip_address))
 
@@ -965,13 +995,17 @@ class Cluster(object):
             self.master_name))
 
         # hash/salt the Jupyter login password
-        sha1_py = 'from notebook.auth import passwd; print passwd("{}")'.format(
+        sha1_py = 'from notebook.auth import passwd; print(passwd("{}"))'.format(
             self.opts.jupyter_password)
-        sha1_cmd = "/home/ubuntu/anaconda2/bin/python -c '{}'".format(sha1_py)
-        passwd = self.run(self.master_instance, sha1_cmd)[0].strip()
+        sha1_cmd = "/home/ubuntu/anaconda3/bin/python -c '{}'".format(sha1_py)
+        raw_passwd = self.run(self.master_instance, sha1_cmd)[0].strip()
+        if sys.version_info[0] > 2:
+            passwd = raw_passwd.decode('utf-8')
+        else:
+            passwd = raw_passwd
 
         # make a new Jupyter profile and directory; edit the config
-        create_profile_cmd = '/home/ubuntu/anaconda2/bin/jupyter notebook --generate-config'
+        create_profile_cmd = '/home/ubuntu/anaconda3/bin/jupyter notebook --generate-config'
         self.run(self.master_instance, create_profile_cmd)
         if self.opts.master_ebs_vol_num > 0:
             notebook_dir = os.path.join(self.opts.master_ebs_raid_dir, 'jupyter')
@@ -989,7 +1023,7 @@ class Cluster(object):
         self.run(self.master_instance, profile_config_cmd)
 
         # start a backgroud Jupyter instance
-        jupyter_start_cmd = "/home/ubuntu/anaconda2/bin/jupyter notebook --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
+        jupyter_start_cmd = "/home/ubuntu/anaconda3/bin/jupyter notebook --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
         self.run(self.master_instance, jupyter_start_cmd)
         print("Jupyter notebook URL: http://{}:{}".format(self.master_instance.public_ip_address, 8899))
         print("Password for the Jupyter notebook is '{}'".format(self.opts.jupyter_password))
@@ -1068,6 +1102,22 @@ class Cluster(object):
 
 
 def configure_base_image(ip_address, user, identity_file, debug=False):
+    # fix hostname mapping
+    hostname_cmd = 'echo "$(cat /etc/hostname)"'
+    o, e = run_ssh(hostname_cmd, ip_address, user, identity_file)
+    if sys.version_info[0] > 2:
+        o = o.decode('utf-8')
+    hostname = o.strip()
+    update_hosts_cmd = "sudo sed -i 's/127.0.0.1 localhost/127.0.0.1 localhost {}/g' /etc/hosts".format(hostname)
+    o, e = run_ssh(update_hosts_cmd, ip_address, user, identity_file)
+    if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
+        print('\n\nFIX HOSTNAME MAPPING')
+        print(o)
+        print(e)
+
     # Initial configuration
     init_cmd = 'sudo debconf-set-selections <<< "postfix postfix/mailname string your.hostname.com"'
     init_cmd += ''' && sudo debconf-set-selections <<< "postfix postfix/main_mailer_type string 'Internet Site'"'''
@@ -1075,31 +1125,34 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo apt-get install -y build-essential wget bzip2 fail2ban htop default-jre \
         ca-certificates libglib2.0-0 libxext6 libsm6 libxrender1 pigz s3cmd git mercurial \
         subversion libtool automake zlib1g-dev libbz2-dev pkg-config muscle mafft cd-hit unzip \
-        libfontconfig1 lvm2 mdadm nfs-kernel-server\
+        libfontconfig1 lvm2 mdadm nfs-kernel-server \
         && sudo ln -s /usr/bin/cdhit /usr/bin/cd-hit \
         && sudo mkdir /tools \
         && sudo chmod 777 /tools'
     o, e = run_ssh(init_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nINITIAL CONFIGURATION')
         print(o)
         print(e)
 
     # Anaconda
-    # conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda2/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
-    #     && cd /tools \
-    #     && wget --quiet https://repo.continuum.io/archive/Anaconda2-4.0.0-Linux-x86_64.sh \
-    #     && /bin/bash ./Anaconda2-4.0.0-Linux-x86_64.sh -b -p /home/ubuntu/anaconda2 \
-    #     && rm /tools/Anaconda2-4.0.0-Linux-x86_64.sh \
-    #     && export PATH=/home/ubuntu/anaconda2/bin:$PATH"
-    conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda2/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
+    conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda3/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
         && cd /tools \
-        && wget --quiet https://repo.continuum.io/archive/Anaconda2-5.0.0.1-Linux-x86_64.sh \
-        && /bin/bash ./Anaconda2-5.0.0.1-Linux-x86_64.sh -b -p /home/ubuntu/anaconda2 \
-        && rm /tools/Anaconda2-5.0.0.1-Linux-x86_64.sh \
-        && export PATH=/home/ubuntu/anaconda2/bin:$PATH"
+        && wget --quiet https://repo.continuum.io/archive/Anaconda3-5.0.1-Linux-x86_64.sh \
+        && /bin/bash ./Anaconda3-5.0.1-Linux-x86_64.sh -b -p /home/ubuntu/anaconda3 \
+        && rm /tools/Anaconda3-5.0.1-Linux-x86_64.sh \
+        && export PATH=/home/ubuntu/anaconda3/bin:$PATH \
+        && sudo add-apt-repository -y ppa:chronitis/jupyter \
+        && sudo apt-get update --fix-missing \
+        && sudo apt-get install -y ijulia irkernel ijavascript"
     o, e = run_ssh(conda_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nANACONDA')
         print(o)
         print(e)
@@ -1122,6 +1175,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo mv /etc/mongod.conf /etc/mongod.conf.orig'
     o, e = run_ssh(mongo_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nMONGODB')
         print(o)
         print(e)
@@ -1137,6 +1193,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo ldconfig'
     o, e = run_ssh(panda_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nPANDASEQ')
         print(o)
         print(e)
@@ -1145,9 +1204,12 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
     bs_cmd = 'cd /tools \
         && git clone https://github.com/basespace/basespace-python-sdk \
         && cd basespace-python-sdk/src \
-        && /home/ubuntu/anaconda2/bin/python setup.py install'
+        && /home/ubuntu/anaconda3/bin/python setup.py install'
     o, e = run_ssh(bs_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nBASESPACE PYTHON SDK')
         print(o)
         print(e)
@@ -1159,25 +1221,34 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo cp usearch /usr/local/bin/'
     o, e = run_ssh(usearch_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nUSEARCH')
         print(o)
         print(e)
 
     # FASTQC
-    fqc_cmd = 'cd /tools \
+    fastqc_cmd = 'cd /tools \
         && wget http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.5.zip \
         && unzip fastqc_v0.11.5.zip \
         && sudo ln -s FastQC/fastqc /usr/local/bin/fastqc'
-    o, e = run_ssh(fqc_cmd, ip_address, user, identity_file)
+    o, e = run_ssh(fastqc_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nFASTQC')
         print(o)
         print(e)
 
     # cutadapt
-    cut_cmd = '/home/ubuntu/anaconda2/bin/pip install cutadapt'
-    o, e = run_ssh(cut_cmd, ip_address, user, identity_file)
+    cutadapt_cmd = '/home/ubuntu/anaconda3/bin/pip install cutadapt'
+    o, e = run_ssh(cutadapt_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nCUTADAPT')
         print(o)
         print(e)
@@ -1197,22 +1268,31 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         && sudo ln -s ./sickle /usr/local/bin/sickle'
     o, e = run_ssh(sickle_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nSICKLE')
         print(o)
         print(e)
 
     # AbStar
-    abstar_cmd = '/home/ubuntu/anaconda2/bin/pip install abstar'
+    abstar_cmd = '/home/ubuntu/anaconda3/bin/pip install abstar'
     o, e = run_ssh(abstar_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nABSTAR')
         print(o)
         print(e)
 
     # celery[redis]
-    celery_cmd = '/home/ubuntu/anaconda2/bin/pip install celery[redis]'
+    celery_cmd = '/home/ubuntu/anaconda3/bin/pip install celery[redis]'
     o, e = run_ssh(celery_cmd, ip_address, user, identity_file)
     if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
         print('\n\nCELERY[REDIS]')
         print(o)
         print(e)
@@ -1351,7 +1431,7 @@ def check_for_basespace_credentials(cluster):
 
 
 def get_celery_info(cluster):
-    celery_info_cmd = '/home/ubuntu/anaconda2/bin/celery -A abstar.utils.queue.celery status'
+    celery_info_cmd = '/home/ubuntu/anaconda3/bin/celery -A abstar.utils.queue.celery status'
     info = cluster.run(cluster.master_instance, celery_info_cmd)[0]
     total = 0
     running = 0
