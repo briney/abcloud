@@ -1336,7 +1336,7 @@ def retrieve_cluster(cluster_name, opts):
     master_instances = ec2utils.get_instances(ec2, master_group_name)
     master_instances = [i for i in master_instances if i.state['Name'] == 'running']
     if len(master_instances) == 0:
-        return Cluster(cluster_name, opts=opts)
+        exit("ERROR: Supplied cluster/master '{}' was not found or no instances are currently running.".format(cluster_name))
     vpc_id = master_instances[0].vpc_id
     vpc = [v for v in ec2.vpcs.all() if v.id == vpc_id][0]
     c = Cluster(cluster_name, opts=opts, vpc=vpc)
