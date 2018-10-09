@@ -1207,7 +1207,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         basespace_url = 'https://github.com/basespace/basespace-python-sdk'
     bs_cmd = 'cd /tools \
         && git clone {} \
-        && cd basespace-python-sdk/src \
+        && cd basespace-python3-sdk/src \
         && /home/ubuntu/anaconda3/bin/python setup.py install'.format(basespace_url)
     o, e = run_ssh(bs_cmd, ip_address, user, identity_file)
     if debug:
@@ -1280,7 +1280,11 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(e)
 
     # AbStar
-    abstar_cmd = '/home/ubuntu/anaconda3/bin/pip install abstar'
+    abstar_url = 'https://github.com/menis/abstar.git'
+    abstar_cmd = 'cd /tools \
+        && git clone {} \
+        && cd abstar/ \
+        && /home/ubuntu/anaconda3/bin/python setup.py install'.format(abstar_url)
     o, e = run_ssh(abstar_cmd, ip_address, user, identity_file)
     if debug:
         if sys.version_info[0] > 2:
@@ -1301,6 +1305,27 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(o)
         print(e)
 
+    # scikit
+    scikit_cmd = '/home/ubuntu/anaconda3/bin/pip install scikit-bio'
+    o, e = run_ssh(scikit_cmd, ip_address, user, identity_file)
+    if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
+        print('\n\nSCIKIT-BIO')
+        print(o)
+        print(e)
+
+    # abutils
+    abutils_cmd = '/home/ubuntu/anaconda3/bin/pip install abutils'
+    o, e = run_ssh(abutils_cmd, ip_address, user, identity_file)
+    if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
+        print('\n\nABUTILS')
+        print(o)
+        print(e)
 
 def run_ssh(cmd, ip_address, user, identity_file, stdin=None):
     with paramiko.SSHClient() as ssh:
