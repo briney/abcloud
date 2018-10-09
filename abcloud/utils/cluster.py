@@ -1202,7 +1202,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
 
     # BaseSpace Python SDK
     if sys.version_info[0] > 2:
-        basespace_url = 'https://github.com/briney/basespace-python-sdk'
+        basespace_url = 'https://github.com/menis/basespace-python3-sdk.git'
     else:
         basespace_url = 'https://github.com/basespace/basespace-python-sdk'
     bs_cmd = 'cd /tools \
