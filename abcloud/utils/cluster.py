@@ -1317,13 +1317,32 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(e)
 
     # abutils
-    abutils_cmd = '/home/ubuntu/anaconda3/bin/pip install abutils'
+    abutils_url = 'https://github.com/menis/abutils.git'
+    abutils_cmd = 'cd /tools \
+        && git clone {} \
+        && cd abutils/ \
+        && /home/ubuntu/anaconda3/bin/python setup.py install'.format(abutils_url)
     o, e = run_ssh(abutils_cmd, ip_address, user, identity_file)
     if debug:
         if sys.version_info[0] > 2:
             o = o.decode('utf-8')
             e = e.decode('utf-8')
         print('\n\nABUTILS')
+        print(o)
+        print(e)
+
+    # vaxtools
+    vaxtools_url = 'git clone https://github.com/menis/vaxtools -b development'
+    vaxtools_cmd = 'cd /tools \
+        && git clone {} \
+        && cd abutils/ \
+        && /home/ubuntu/anaconda3/bin/python setup.py install'.format(vaxtools_url)
+    o, e = run_ssh(vaxtools_cmd, ip_address, user, identity_file)
+    if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
+        print('\n\nVAXTOOLS')
         print(o)
         print(e)
 
