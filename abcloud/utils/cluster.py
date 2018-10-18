@@ -1335,7 +1335,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
     vaxtools_url = 'git clone https://github.com/menis/vaxtools -b development'
     vaxtools_cmd = 'cd /tools \
         && git clone {} \
-        && cd abutils/ \
+        && cd vaxtools/ \
         && /home/ubuntu/anaconda3/bin/python setup.py install'.format(vaxtools_url)
     o, e = run_ssh(vaxtools_cmd, ip_address, user, identity_file)
     if debug:
