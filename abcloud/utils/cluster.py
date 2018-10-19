@@ -1332,7 +1332,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(e)
 
     # vaxtools
-    vaxtools_url = 'git clone https://github.com/menis/vaxtools -b development'
+    vaxtools_url = 'https://github.com/menis/vaxtools -b development'
     vaxtools_cmd = 'cd /tools \
         && git clone {} \
         && cd vaxtools/ \
