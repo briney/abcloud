@@ -1202,12 +1202,12 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
 
     # BaseSpace Python SDK
     if sys.version_info[0] > 2:
-        basespace_url = 'https://github.com/briney/basespace-python-sdk'
+        basespace_url = 'https://github.com/menis/basespace-python3-sdk.git'
     else:
         basespace_url = 'https://github.com/basespace/basespace-python-sdk'
     bs_cmd = 'cd /tools \
         && git clone {} \
-        && cd basespace-python-sdk/src \
+        && cd basespace-python3-sdk/src \
         && /home/ubuntu/anaconda3/bin/python setup.py install'.format(basespace_url)
     o, e = run_ssh(bs_cmd, ip_address, user, identity_file)
     if debug:
@@ -1280,7 +1280,11 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(e)
 
     # AbStar
-    abstar_cmd = '/home/ubuntu/anaconda3/bin/pip install abstar'
+    abstar_url = 'https://github.com/menis/abstar.git'
+    abstar_cmd = 'cd /tools \
+        && git clone {} \
+        && cd abstar/ \
+        && /home/ubuntu/anaconda3/bin/python setup.py install'.format(abstar_url)
     o, e = run_ssh(abstar_cmd, ip_address, user, identity_file)
     if debug:
         if sys.version_info[0] > 2:
@@ -1301,6 +1305,46 @@ def configure_base_image(ip_address, user, identity_file, debug=False):
         print(o)
         print(e)
 
+    # scikit
+    scikit_cmd = '/home/ubuntu/anaconda3/bin/pip install scikit-bio'
+    o, e = run_ssh(scikit_cmd, ip_address, user, identity_file)
+    if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
+        print('\n\nSCIKIT-BIO')
+        print(o)
+        print(e)
+
+    # abutils
+    abutils_url = 'https://github.com/menis/abutils.git'
+    abutils_cmd = 'cd /tools \
+        && git clone {} \
+        && cd abutils/ \
+        && /home/ubuntu/anaconda3/bin/python setup.py install'.format(abutils_url)
+    o, e = run_ssh(abutils_cmd, ip_address, user, identity_file)
+    if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
+        print('\n\nABUTILS')
+        print(o)
+        print(e)
+
+    # vaxtools
+    vaxtools_url = 'https://github.com/menis/vaxtools -b development'
+    vaxtools_cmd = 'cd /tools \
+        && git clone {} \
+        && cd vaxtools/ \
+        && /home/ubuntu/anaconda3/bin/python setup.py install'.format(vaxtools_url)
+    o, e = run_ssh(vaxtools_cmd, ip_address, user, identity_file)
+    if debug:
+        if sys.version_info[0] > 2:
+            o = o.decode('utf-8')
+            e = e.decode('utf-8')
+        print('\n\nVAXTOOLS')
+        print(o)
+        print(e)
 
 def run_ssh(cmd, ip_address, user, identity_file, stdin=None):
     with paramiko.SSHClient() as ssh:
@@ -1336,7 +1380,7 @@ def retrieve_cluster(cluster_name, opts):
     master_instances = ec2utils.get_instances(ec2, master_group_name)
     master_instances = [i for i in master_instances if i.state['Name'] == 'running']
     if len(master_instances) == 0:
-        return Cluster(cluster_name, opts=opts)
+        exit("ERROR: Supplied cluster/master '{}' was not found or no instances are currently running.".format(cluster_name))
     vpc_id = master_instances[0].vpc_id
     vpc = [v for v in ec2.vpcs.all() if v.id == vpc_id][0]
     c = Cluster(cluster_name, opts=opts, vpc=vpc)
