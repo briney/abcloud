@@ -111,7 +111,7 @@ def parse_args(print_help=False):
         help="Resume installation on a previously launched cluster \
              (for debugging)")
     parser.add_argument(
-        "--master-root-vol-size", metavar="ROOT_SIZE", type=int, default=50,
+        "--master-root-vol-size", metavar="ROOT_SIZE", type=int, default=250,
         help="Size (in GB) of the root EBS volume to be attached to the master node.")
     parser.add_argument(
         "--master-ebs-vol-size", metavar="SIZE", type=int, default=25,
@@ -274,7 +274,7 @@ class Args(object):
     def __init__(self, action, cluster_name=None, path1=None, path2=None, localpath=None,
         remotepath=None, workers=0, key_pair='default', identity_file=IDENTITY_FILE_PATH,
         instance_type=INSTANCE_TYPE, master_instance_type=None,
-        node=None, region='us-east-1', zone=None, ami=None, master_root_vol_size=50,
+        node=None, region='us-east-1', zone=None, ami=None, master_root_vol_size=250,
         deploy_root_dir=False, resume=False, master_ebs_vol_size=25, master_ebs_vol_num=4,
         master_ebs_raid_level=0, master_ebs_raid_dir='\data',
         ebs_vol_size=0, ebs_vol_type='standard', ebs_vol_num=1,
@@ -389,6 +389,9 @@ def verify_boto_credentials():
             sys.exit(1)
 
 
+def print_cluster_params(clust):
+    pass
+
 def main(action, cluster_name, args):
     # validate
     validate_args(args)
@@ -408,6 +411,13 @@ def main(action, cluster_name, args):
 
     elif action == 'list':
         cluster.list_clusters(args)
+
+    elif action == 'ls':
+        cluster.list_clusters(args)
+
+    elif action == 'ssh':
+        clust = cluster.retrieve_cluster(cluster_name, args)
+        clust.ssh()
 
     elif action == 'sshmaster':
         clust = cluster.retrieve_cluster(cluster_name, args)
