@@ -25,8 +25,8 @@
 
 import os
 
-
-ABCLOUD_VERSION = "0.0.1"
+exec(open('../version.py').read())
+ABCLOUD_VERSION = __version__
 
 IDENTITY_FILE_PATH = os.path.expanduser('~/.aws/default.pem')
 
