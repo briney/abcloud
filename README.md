@@ -1,51 +1,62 @@
-# AbCloud  
+# abcloud  
 
-EC2 instance/cluster management. Still under active development, but main commands (launch, sshmaster/sshnode, destroy, terminate, get, put) are stable and should not undergo breaking changes.
+EC2 instance/cluster management. Still under active development, but main commands (launch, ssh/sshnode, destroy, terminate, get, put) are fairly stable and hopefully won't undergo breaking changes.
 
-### use
+## use
   
 `abcloud <command> <cluster_name> [options]`  
   
-Launch a basic cluster named 'test' with a master and 2 workers, all m3.large:  
-`abcloud launch test --workers 2`  
+### launch clusters/instances
   
-Launch a basic 'test' cluster with spot instance workers at a max price of $1.00/hr:  
-`abcloud launch test --workers 2 --spot-price 1.00`  
+Launch a single instance named 'my-instance' (the default instance type is m5.8xlarge):  
+`abcloud launch my-instance` 
+
+Launch a cluster named 'my-cluster' with a master and 2 workers, all m5.8xlarge:  
+`abcloud launch my-cluster --workers 2`  
+  
+Launch a cluster with spot instance workers at a max price of $1.00/hr (by default, only the workers use spot pricing and masters are on-demand):  
+`abcloud launch my-cluster --workers 2 --spot-price 1.00`  
+
+Launch a single instance using spot pricing:  
+`abcloud launch my-instance --spot-price 1.00 --force-spot-master`  
+
+Launch a cluster with 2 workers of type m5.8xlarge and a master of type m5.24xlarge:  
+`abcloud launch my-cluster --workers 2 --master-instance-type m5.24xlarge --instance-type m5.8xlarge`   
+  
+Launch a single instance ith 8x500GB EBS volumes in RAID10 (the default is ):  
+`abcloud launch my-instance --master-ebs-vol-num 8 --master-ebs-vol-size 500 --master-ebs-raid-level 10` 
+  
+### connect to clusters/instances  
   
 SSH into the master instance of the 'test' cluster:  
-`abcloud sshmaster test`
+`abcloud ssh test`
   
 SSH into node001 of the 'test' cluster:  
 `abcloud sshnode test --node node001`
   
-Put a file (local path: '~/myfile') onto the master instance of the 'test' cluster (remote path: '/scratch'):  
+### put/get files  
+
+Put a file (local path: '~/myfile') onto the master instance of 'my-cluster' (remote path: '/scratch'):  
 `abcloud put test ~/myfile /scratch`
   
 Put the same file onto node001 of the 'test' cluster:  
-`abcloud put test --node node001 /home/me/myfile /scratch`
+`abcloud put test --node node001 ~/myfile /scratch`
   
+### terminate or destroy clusters
+
 Terminate the 'test' cluster:  
 `abcloud terminate test`  
   
 Destroy the 'test' cluster (same as terminate, but also deletes security groups):  
-`abcloud destroy test`    
-    
-Launch a single instance (r3.2xlarge) named 'jupyter' running a Jupyter Notebook server:  
-`abcloud launch jupyter --instance-type r3.2xlarge --jupyter`  
-  
-Launch 'jupyter' instance running a Jupyter server, but using spot pricing:  
-`abcloud launch jupyter --jupyter --spot-price 2.00 --force-spot-master`  
-  
-Launch a single instance named 'mongo' running MongoDB with 8x500GB EBS volumes in RAID10:  
-`abcloud launch mongo --master-ebs-vol-num 8 --master-ebs-vol-size 500 --master-ebs-raid-level 10 --mongodb`  
+`abcloud destroy test`     
   
 To get a full list of options and default settings:  
 `abcloud --help`
-
-
-### requirements  
   
-Python 2.7 (3.x probably doesn't work, but hasn't been tested)  
+  
+## requirements  
+  
+Python 3.5+   
 boto3  
 paramiko  
   
