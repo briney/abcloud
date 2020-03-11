@@ -30,7 +30,7 @@ ABCLOUD_VERSION = '0.1.0'
 
 IDENTITY_FILE_PATH = os.path.expanduser('~/.aws/default.pem')
 
-INSTANCE_TYPE = 'm3.large'
+INSTANCE_TYPE = 'm5.8xlarge'
 
 DEPLOY_TO_ROOT = ''
 
