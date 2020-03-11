@@ -6,8 +6,10 @@ EC2 instance/cluster management. Still under active development, but main comman
   
 `pip install abcloud`
   
-Out of the box, abcloud assumes you have an EC2 key file, named `default` and located at `~/.aws/default.pem`. Both of these defaults can be changed at runtime, using the `--key-pair` option to pass an alternative key name and the `--identity-file` option to pass an alternate path to your keyfile.  
-
+Out of the box, `abcloud` assumes you have an EC2 key file, named `default` and located at `~/.aws/default.pem`. Both of these defaults can be changed at runtime, using the `--key-pair` option to pass an alternative key name and the `--identity-file` option to pass an alternate path to your keyfile.  
+  
+`abcloud` uses `boto`, which is Amazon's Python API for working with AWS. Once `boto` is installed (it will be installed automatically when you install `abcloud` with `pip`), you should [configure your AWS credentials](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html#shared-credentials-file).
+  
 ## use
   
 `abcloud <command> <cluster_name> [options]`  
