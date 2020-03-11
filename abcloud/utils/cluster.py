@@ -1337,9 +1337,9 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     if verbose:
         print('  - installing the BaseSpace Python API')
     bs_cmd = 'cd /tools \
-        && git clone https://github.com/basespace/basespace-python-sdk \
+        && git clone {} \
         && cd basespace-python-sdk/src \
-        && /home/ubuntu/anaconda3/bin/python setup.py install'
+        && /home/ubuntu/anaconda3/bin/python setup.py install'.format(basespace_url)
     o, e = run_ssh(bs_cmd, ip_address, user, identity_file)
     std_prefix = '/home/ubuntu/.abcloud/log/07-basespace_python_sdk'
     write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o, stderr=e)

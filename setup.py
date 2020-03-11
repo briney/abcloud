@@ -36,8 +36,8 @@ exec(open('abcloud/version.py').read())
 config = {
     'description': 'abcloud',
     'author': 'Bryan Briney',
-    'url': 'www.github.com/briney/abcloud/',
-    'download_url': 'www.github.com/briney/abcloud/',
+    'url': 'https://www.github.com/briney/abcloud',
+    'download_url': 'https://www.github.com/briney/abcloud',
     'author_email': 'briney@scripps.edu',
     'version': __version__,
     'install_requires': install_requires,
