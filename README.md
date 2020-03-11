@@ -1,6 +1,12 @@
 # abcloud  
 
-EC2 instance/cluster management. Still under active development, but main command syntax (launch, ssh/sshnode, destroy, terminate, get, put) is fairly stable and hopefully won't undergo breaking changes.
+EC2 instance/cluster management. Still under active development, but main command syntax (launch, ssh/sshnode, destroy, terminate, get, put) is fairly stable and hopefully won't undergo breaking changes.  
+  
+## install  
+  
+`pip install abcloud`
+  
+Out of the box, abcloud assumes you have an EC2 key file, named `default` and located at `~/.aws/default.pem`. Both of these defaults can be changed at runtime, using the `--key-pair` option to pass an alternative key name and the `--identity-file` option to pass an alternate path to your keyfile.  
 
 ## use
   
