@@ -93,9 +93,6 @@ def parse_args(print_help=False):
     parser.add_argument(
         "-a", "--ami", default=None,
         help="Amazon Machine Image ID to use")
-    # parser.add_argument(
-    #     "--abtools-version", default=DEFAULT_ABTOOLS_VERSION,
-    #     help="Version of AbTools to use: 'X.Y.Z' (default: %default)")
     parser.add_argument('-l', '--log', dest='logfile', default=None,
         help='Path to logfile location. If not supplied, log will not be generated.')
     parser.add_argument(
@@ -161,12 +158,6 @@ def parse_args(print_help=False):
         "--force-spot-master", default=False, action='store_true',
         help="If specified, master will be launched as a spot instance \
              using --spot-price as maximum price.")
-    # parser.add_argument(
-    #     "--add-nodes", metavar="NODES", type="int",
-    #     help="Number of nodes to add to a resized cluster.")
-    # parser.add_argument(
-    #     "--remove-nodes", metavar="NODES", type="int",
-    #     help="Number of nodes to remove from a resized cluster.")
     parser.add_argument("--no-celery", action="store_false", dest="celery", default=True,
         help="Disable Celery configuration on the cluster.")
     parser.add_argument("--no-basespace-credentials", action="store_false", dest="basespace_credentials", default=True,
@@ -207,18 +198,9 @@ def parse_args(print_help=False):
         help='If set, will request a SSH password for port forwarding.')
     parser.add_argument('--tunnel-keyfile', dest='tunnel_keyfile', default=None,
         help='SSH keyfile for port forwarding. Default is None.')
-    # parser.add_argument(
-    #     "--user-data", type="string", default="",
-    #     help="Path to a user-data file (most AMIs interpret this as an initialization script)")
     parser.add_argument(
         "--authorized-address", type=str, default="0.0.0.0/0",
         help="Address to authorize on created security groups (default: 0.0.0.0/0)")
-    # parser.add_argument(
-    #     "--additional-security-group", type="string", default="",
-    #     help="Additional security group to place the machines in")
-    # parser.add_argument(
-    #     "--copy-aws-credentials", action="store_true", default=False,
-    #     help="Add AWS credentials to hadoop configuration to allow Spark to access S3")
     parser.add_argument(
         "--subnet-id", default=None,
         help="VPC subnet to launch instances in")
