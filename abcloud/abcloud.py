@@ -93,9 +93,6 @@ def parse_args(print_help=False):
     parser.add_argument(
         "-a", "--ami", default=None,
         help="Amazon Machine Image ID to use")
-    # parser.add_argument(
-    #     "--abtools-version", default=DEFAULT_ABTOOLS_VERSION,
-    #     help="Version of AbTools to use: 'X.Y.Z' (default: %default)")
     parser.add_argument('-l', '--log', dest='logfile', default=None,
         help='Path to logfile location. If not supplied, log will not be generated.')
     parser.add_argument(
@@ -111,7 +108,7 @@ def parse_args(print_help=False):
         help="Resume installation on a previously launched cluster \
              (for debugging)")
     parser.add_argument(
-        "--master-root-vol-size", metavar="ROOT_SIZE", type=int, default=50,
+        "--master-root-vol-size", metavar="ROOT_SIZE", type=int, default=250,
         help="Size (in GB) of the root EBS volume to be attached to the master node.")
     parser.add_argument(
         "--master-ebs-vol-size", metavar="SIZE", type=int, default=25,
@@ -161,12 +158,6 @@ def parse_args(print_help=False):
         "--force-spot-master", default=False, action='store_true',
         help="If specified, master will be launched as a spot instance \
              using --spot-price as maximum price.")
-    # parser.add_argument(
-    #     "--add-nodes", metavar="NODES", type="int",
-    #     help="Number of nodes to add to a resized cluster.")
-    # parser.add_argument(
-    #     "--remove-nodes", metavar="NODES", type="int",
-    #     help="Number of nodes to remove from a resized cluster.")
     parser.add_argument("--no-celery", action="store_false", dest="celery", default=True,
         help="Disable Celery configuration on the cluster.")
     parser.add_argument("--no-basespace-credentials", action="store_false", dest="basespace_credentials", default=True,
@@ -207,18 +198,9 @@ def parse_args(print_help=False):
         help='If set, will request a SSH password for port forwarding.')
     parser.add_argument('--tunnel-keyfile', dest='tunnel_keyfile', default=None,
         help='SSH keyfile for port forwarding. Default is None.')
-    # parser.add_argument(
-    #     "--user-data", type="string", default="",
-    #     help="Path to a user-data file (most AMIs interpret this as an initialization script)")
     parser.add_argument(
         "--authorized-address", type=str, default="0.0.0.0/0",
         help="Address to authorize on created security groups (default: 0.0.0.0/0)")
-    # parser.add_argument(
-    #     "--additional-security-group", type="string", default="",
-    #     help="Additional security group to place the machines in")
-    # parser.add_argument(
-    #     "--copy-aws-credentials", action="store_true", default=False,
-    #     help="Add AWS credentials to hadoop configuration to allow Spark to access S3")
     parser.add_argument(
         "--subnet-id", default=None,
         help="VPC subnet to launch instances in")
@@ -274,7 +256,7 @@ class Args(object):
     def __init__(self, action, cluster_name=None, path1=None, path2=None, localpath=None,
         remotepath=None, workers=0, key_pair='default', identity_file=IDENTITY_FILE_PATH,
         instance_type=INSTANCE_TYPE, master_instance_type=None,
-        node=None, region='us-east-1', zone=None, ami=None, master_root_vol_size=50,
+        node=None, region='us-east-1', zone=None, ami=None, master_root_vol_size=250,
         deploy_root_dir=False, resume=False, master_ebs_vol_size=25, master_ebs_vol_num=4,
         master_ebs_raid_level=0, master_ebs_raid_dir='\data',
         ebs_vol_size=0, ebs_vol_type='standard', ebs_vol_num=1,
@@ -389,6 +371,9 @@ def verify_boto_credentials():
             sys.exit(1)
 
 
+def print_cluster_params(clust):
+    pass
+
 def main(action, cluster_name, args):
     # validate
     validate_args(args)
@@ -408,6 +393,13 @@ def main(action, cluster_name, args):
 
     elif action == 'list':
         cluster.list_clusters(args)
+
+    elif action == 'ls':
+        cluster.list_clusters(args)
+
+    elif action == 'ssh':
+        clust = cluster.retrieve_cluster(cluster_name, args)
+        clust.ssh()
 
     elif action == 'sshmaster':
         clust = cluster.retrieve_cluster(cluster_name, args)

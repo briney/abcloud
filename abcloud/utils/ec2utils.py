@@ -242,7 +242,7 @@ def wait_for_instance_state(ec2c, instance_ids, state):
         instances = [i for r in response['Reservations'] for i in r['Instances']]
         states = [i['State']['Name'] for i in instances]
         pending = [s != state for s in states]
-    progbar.progress_bar(len(instances), len(instances), start)
+    progbar.progress_bar(len(instances), len(instances), start, completion_string='')
 
 
 def get_num_disks(instance_type):
