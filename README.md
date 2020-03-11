@@ -1,6 +1,6 @@
 # abcloud  
 
-EC2 instance/cluster management. Still under active development, but main commands (launch, ssh/sshnode, destroy, terminate, get, put) are fairly stable and hopefully won't undergo breaking changes.
+EC2 instance/cluster management. Still under active development, but main command syntax (launch, ssh/sshnode, destroy, terminate, get, put) is fairly stable and hopefully won't undergo breaking changes.
 
 ## use
   
