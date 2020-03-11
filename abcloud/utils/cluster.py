@@ -81,6 +81,8 @@ class Cluster(object):
         self._worker_names = None
         self._worker_instances = None
         self._image = None
+        self._master_is_nitro = None
+        self._worker_is_nitro = None
 
 
     @property
@@ -297,6 +299,43 @@ class Cluster(object):
     def image(self, image):
         self._image = image
 
+    
+    @property
+    def master_is_nitro(self):
+        if self._master_is_nitro is None:
+            if self.opts.master_instance_type is not None:
+                instance_type = self.opts.master_instance_type
+            else:
+                instance_type = self.opts.instance_type
+            resp = self.ec2c.describe_instance_types(InstanceTypes=[instance_type])
+            if resp['InstanceTypes'][0]['Hypervisor'].lower() == 'nitro':
+                self._master_is_nitro = True
+            else:
+                self._master_is_nitro = False
+        return self._master_is_nitro
+
+    @master_is_nitro.setter
+    def master_is_nitro(self, is_nitro):
+        self._master_is_nitro = is_nitro
+
+
+    @property
+    def worker_is_nitro(self):
+        if self._worker_is_nitro is None:
+            resp = self.ec2c.describe_instance_types(InstanceTypes=[self.opts.instance_type])
+            if resp['InstanceTypes'][0]['Hypervisor'].lower() == 'nitro':
+                self._worker_is_nitro = True
+            else:
+                self._worker_is_nitro = False
+        return self._worker_is_nitro
+
+    @worker_is_nitro.setter
+    def worker_is_nitro(self, is_nitro):
+        self._worker_is_nitro = is_nitro
+
+
+
+
 
     def _retrieve_vpc(self, vpc_id):
         if vpc_id is None:
@@ -421,8 +460,7 @@ class Cluster(object):
         master_block_device_mappings.append(root_map)
         worker_block_device_mappings.append(root_map)
         for i in range(self.opts.master_ebs_vol_num):
-            # EBS volumes are /dev/xvdaa, /dev/xvdab...
-            device_name = "/dev/xvda" + string.ascii_lowercase[i]
+            device_name = "/dev/xvd" + string.ascii_lowercase[i + 1]
             ebs = {'VolumeSize': self.opts.master_ebs_vol_size,
                    'VolumeType': self.opts.master_ebs_vol_type}
             device_map = {'DeviceName': device_name,
@@ -846,7 +884,10 @@ class Cluster(object):
             self.write_ssh_log(instance, log_prefix, stdout=o, stderr=e)
 
         # build and share an EBS volumne on the master node
-        devices = ['/dev/xvda' + string.ascii_lowercase[i] for i in range(self.opts.master_ebs_vol_num)]
+        if self.master_is_nitro:
+            devices = ['/dev/nvme{}n1'.format(i + 1) for i in range(self.opts.master_ebs_vol_num)]
+        else:
+            devices = ['/dev/xvda' + string.ascii_lowercase[i] for i in range(self.opts.master_ebs_vol_num)]
         if len(devices) > 1:
             volume = self.build_ebs_raid_volume(devices)
         elif len(devices) == 1:
