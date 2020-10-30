@@ -1268,10 +1268,11 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
         print('  - installing Anaconda')
     conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda3/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
         && cd /tools \
-        && wget --quiet https://repo.continuum.io/archive/Anaconda3-5.0.1-Linux-x86_64.sh \
-        && /bin/bash ./Anaconda3-5.0.1-Linux-x86_64.sh -b -p /home/ubuntu/anaconda3 \
-        && rm /tools/Anaconda3-5.0.1-Linux-x86_64.sh \
-        && export PATH=/home/ubuntu/anaconda3/bin:$PATH \
+        && wget --quiet https://repo.anaconda.com/archive/Anaconda3-2020.07-Linux-x86_64.sh -O anaconda.sh\
+        && /bin/bash ./anaconda.sh -b -p /home/ubuntu/anaconda3 \
+        && rm /tools/anaconda.sh \
+        && echo 'export PATH=/home/ubuntu/anaconda3/bin:$PATH' >> /home/ubuntu/.bash_profile \
+        && source /home/ubuntu/.bash_profile \
         && sudo add-apt-repository -y ppa:chronitis/jupyter \
         && sudo apt-get update --fix-missing \
         && sudo apt-get install -y ijulia irkernel ijavascript \
@@ -1347,6 +1348,21 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     #     print('\n\nBASESPACE PYTHON SDK')
     #     print(o)
     #     print(e)
+
+    # kallisto
+    if verbose:
+        print('  - installing kallisto')
+    kallisto_cmd = 'cd /tools \
+        && wget https://github.com/pachterlab/kallisto/releases/download/v0.46.1/kallisto_linux-v0.46.1.tar.gz -O kallisto.tar.gz \
+        && tar xzvf /tools/kallisto.tar.gz \
+        && sudo cp /tools/kallisto/kallisto /usr/bin'
+    o, e = run_ssh(kallisto_cmd, ip_address, user, identity_file)
+    std_prefix = '/home/ubuntu/.abcloud/log/07-kallisto'
+    write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o, stderr=e)
+    if debug:
+        print('\n\nKALLISTO')
+        print(o)
+        print(e)
 
     # BaseMount
     if verbose:
@@ -1490,17 +1506,24 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     if verbose:
         print('  - installing CellRanger')
     cellranger_cmd = 'cd /tools \
-                      && wget http://burtonlab.s3.amazonaws.com/software/cellranger-3.1.0.tar \
-                      && tar -xf cellranger-3.1.0.tar \
-                      && echo "export PATH=/tools/cellranger-3.1.0/:$PATH" >>/home/ubuntu/.bash_profile \
+                      && wget https://burtonlab.s3.amazonaws.com/software/cellranger-4.0.0.tar.gz \
+                      && tar -xf cellranger-4.0.0.tar \
+                      && echo "export PATH=/tools/cellranger-4.0.0/:$PATH" >> /home/ubuntu/.bash_profile \
+                      && source /home/ubuntu/.bash_profile \
                       && sudo mkdir /references \
                       && sudo chmod 777 /references'
     o1, e1 = run_ssh(cellranger_cmd, ip_address, user, identity_file)
+    # std_prefix = '/home/ubuntu/.abcloud/log/16-10xGenomics'
+    # write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o1, stderr=e1)
+    # if debug:
+    #     print('\n\n10X GENOMICS')
+    #     print(o1)
+    #     print(e1)
     if verbose:
         print('  - downloading and unpacking reference genome (GRCh38)')
     href_cmd = 'cd /references \
-                && wget -q http://burtonlab.s3.amazonaws.com/refs/refdata-cellranger-GRCh38-3.0.0.tar.gz \
-                && tar xzvf refdata-cellranger-GRCh38-3.0.0.tar.gz'
+                && wget -q https://burtonlab.s3.amazonaws.com/refs/refdata-gex-GRCh38-2020-A.tar.gz \
+                && tar xzvf refdata-gex-GRCh38-2020-A.tar.gz'
     o2, e2 = run_ssh(href_cmd, ip_address, user, identity_file)
     # if verbose:
     #     print('  - downloading and unpacking reference genome (mm10)')
@@ -1511,8 +1534,8 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     if verbose:
         print('  - downloading and unpacking VDJ reference (GRCh38)')
     hvdj_cmd = 'cd /references \
-                && wget -q http://burtonlab.s3.amazonaws.com/refs/refdata-cellranger-vdj-GRCh38-alts-ensembl-3.1.0.tar.gz \
-                && tar xzvf refdata-cellranger-vdj-GRCh38-alts-ensembl-3.1.0.tar.gz'
+                && wget -q https://burtonlab.s3.amazonaws.com/refs/refdata-cellranger-vdj-GRCh38-alts-ensembl-4.0.0.tar.gz \
+                && tar xzvf refdata-cellranger-vdj-GRCh38-alts-ensembl-4.0.0.tar.gz'
     o4, e4 = run_ssh(hvdj_cmd, ip_address, user, identity_file)
     # if verbose:
     #     print('  - downloading and unpacking VDJ reference (mm10)')
@@ -1522,13 +1545,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     # o5, e5 = run_ssh(mvdj_cmd, ip_address, user, identity_file)
     # o = '\n'.join([o1, o2, o3, o4, o5])
     # e = '\n'.join([e1, e2, e3, e4, e5])
-    std_prefix = '/home/ubuntu/.abcloud/log/16-10xGenomics'
-    # write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o1, stderr=e1)
-    if debug:
-        print('\n\n10X GENOMICS')
-        print(o1)
-        print(e1)
-
+    
     # scanpy
     if verbose:
         print('  - installing scanpy')
