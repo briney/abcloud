@@ -1507,7 +1507,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
         print('  - installing CellRanger')
     cellranger_cmd = 'cd /tools \
                       && wget https://burtonlab.s3.amazonaws.com/software/cellranger-4.0.0.tar.gz \
-                      && tar -xf cellranger-4.0.0.tar \
+                      && tar xzvf cellranger-4.0.0.tar.gz \
                       && echo "export PATH=/tools/cellranger-4.0.0/:$PATH" >> /home/ubuntu/.bash_profile \
                       && source /home/ubuntu/.bash_profile \
                       && sudo mkdir /references \
