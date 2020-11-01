@@ -1489,8 +1489,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
         print('  - installing bcl2fastq')
     bcl_cmd = 'sudo apt-get install -y alien dpkg-dev debhelper build-essential \
                && cd /tools \
-               && wget https://support.illumina.com/content/dam/illumina-support/documents/downloads/software/bcl2fastq/bcl2fastq2-v2-20-0-linux-x86-64.zip \
-               && unzip bcl2fastq2-v2-20-0-linux-x86-64.zip \
+               && wget https://burtonlab.s3.amazonaws.com/software/bcl2fastq2-v2.20.0.422-Linux-x86_64.rpm \
                && sudo alien bcl2fastq2-v2.20.0.422-Linux-x86_64.rpm \
                && sudo dpkg -i bcl2fastq2_0v2.20.0.422-2_amd64.deb'
     o, e = run_ssh(bcl_cmd, ip_address, user, identity_file)
