@@ -1463,7 +1463,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     # abstar
     if verbose:
         print('  - installing the ab[x] toolkit')
-    abstar_cmd = '/home/ubuntu/anaconda3/bin/pip install abstar'
+    abstar_cmd = '/home/ubuntu/anaconda3/bin/pip install abutils abstar'
     o, e = run_ssh(abstar_cmd, ip_address, user, identity_file)
     std_prefix = '/home/ubuntu/.abcloud/log/13-abstar'
     write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o, stderr=e)
@@ -1481,6 +1481,22 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o, stderr=e)
     if debug:
         print('\n\nCELERY[REDIS]')
+        print(o)
+        print(e)
+
+    # rabbitmq
+    if verbose:
+        print('  - installing RabbitMQ')
+    rabbitmq_cmd = "sudo apt-get install -y rabbitmq-server"
+    rabbitmq_cmd += " && sudo rabbitmqctl add_user abcloud abcloud"
+    rabbitmq_cmd += " && sudo rabbitmqctl add_vhost abcloud_host"
+    rabbitmq_cmd += " && sudo rabbitmqctl set_user_tags abcloud administrator"
+    rabbitmq_cmd += ' && sudo rabbitmqctl set_permissions -p abcloud_host abcloud ".*" ".*" ".*"'
+    o, e = run_ssh(rabbitmq_cmd, ip_address, user, identity_file)
+    std_prefix = '/home/ubuntu/.abcloud/log/14-rabbitmq'
+    write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o, stderr=e)
+    if debug:
+        print('\n\nRABBITMQ')
         print(o)
         print(e)
 
@@ -1504,20 +1520,35 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     # CellRanger, full reference genomes (mouse and human), and VDJ references (mouse and human)
     if verbose:
         print('  - installing CellRanger')
+    # cellranger_cmd = 'cd /tools \
+    #                   && wget https://burtonlab.s3.amazonaws.com/software/cellranger-5.0.1.tar.gz \
+    #                   && tar xzvf cellranger-5.0.1.tar.gz \
+    #                   && echo "export PATH=/tools/cellranger-5.0.1:$PATH" >> /home/ubuntu/.bash_profile \
+    #                   && sudo mkdir /references \
+    #                   && sudo chmod 777 /references'
+    # cellranger_cmd = 'cd /tools \
+    #                   && wget https://burtonlab.s3.amazonaws.com/software/cellranger-5.0.1.tar.gz \
+    #                   && tar xzvf cellranger-5.0.1.tar.gz \
+    #                   && echo "export PATH=/tools/cellranger-5.0.1:$PATH" >> /home/ubuntu/.bash_profile \
+    #                   && source /home/ubuntu/.bash_profile \
+    #                   && sudo mkdir /references \
+    #                   && sudo chmod 777 /references'
     cellranger_cmd = 'cd /tools \
-                      && wget https://burtonlab.s3.amazonaws.com/software/cellranger-4.0.0.tar.gz \
-                      && tar xzvf cellranger-4.0.0.tar.gz \
-                      && echo "export PATH=/tools/cellranger-4.0.0/:$PATH" >> /home/ubuntu/.bash_profile \
-                      && source /home/ubuntu/.bash_profile \
-                      && sudo mkdir /references \
-                      && sudo chmod 777 /references'
+                    && wget https://burtonlab.s3.amazonaws.com/software/cellranger-6.0.0.tar.gz \
+                    && gunzip cellranger-6.0.0.tar.gz \
+                    && tar xvf cellranger-6.0.0.tar \
+                    && echo "export PATH=/tools/cellranger-6.0.0:$PATH" >> /home/ubuntu/.bash_profile \
+                    && sudo mkdir /references \
+                    && sudo chmod 777 /references'
+    # cellranger_cmd = 'sudo mkdir /references \
+    #                   && sudo chmod 777 /references'
     o1, e1 = run_ssh(cellranger_cmd, ip_address, user, identity_file)
-    # std_prefix = '/home/ubuntu/.abcloud/log/16-10xGenomics'
-    # write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o1, stderr=e1)
-    # if debug:
-    #     print('\n\n10X GENOMICS')
-    #     print(o1)
-    #     print(e1)
+    std_prefix = '/home/ubuntu/.abcloud/log/16-10xGenomics'
+    write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o1, stderr=e1)
+    if debug:
+        print('\n\n10X GENOMICS')
+        print(o1)
+        print(e1)
     if verbose:
         print('  - downloading and unpacking reference genome (GRCh38)')
     href_cmd = 'cd /references \
@@ -1533,8 +1564,8 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     if verbose:
         print('  - downloading and unpacking VDJ reference (GRCh38)')
     hvdj_cmd = 'cd /references \
-                && wget -q https://burtonlab.s3.amazonaws.com/refs/refdata-cellranger-vdj-GRCh38-alts-ensembl-4.0.0.tar.gz \
-                && tar xzvf refdata-cellranger-vdj-GRCh38-alts-ensembl-4.0.0.tar.gz'
+                && wget -q https://burtonlab.s3.amazonaws.com/refs/refdata-cellranger-vdj-GRCh38-alts-ensembl-5.0.0.tar.gz \
+                && tar xzvf refdata-cellranger-vdj-GRCh38-alts-ensembl-5.0.0.tar.gz'
     o4, e4 = run_ssh(hvdj_cmd, ip_address, user, identity_file)
     # if verbose:
     #     print('  - downloading and unpacking VDJ reference (mm10)')
