@@ -160,6 +160,8 @@ def parse_args(print_help=False):
              using --spot-price as maximum price.")
     parser.add_argument("--no-celery", action="store_false", dest="celery", default=True,
         help="Disable Celery configuration on the cluster.")
+    parser.add_argument("--no-spark", action="store_false", dest="spark", default=True,
+        help="Disable Spark configuration on the cluster.")
     parser.add_argument("--no-basespace-credentials", action="store_false", dest="basespace_credentials", default=True,
         help="If set, BaseSpace credentials file will NOT be uploaded to the server/cluster.")
     parser.add_argument("-u", "--user", default="ubuntu",

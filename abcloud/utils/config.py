@@ -39,8 +39,9 @@ MASTER_TCP_PORT_RANGES = [(22, 22),  # SSH
                           (2049, 2049),  # NFS
                           (4040, 4045),
                           (4242, 4242),
-                          (5555, 5555),  # Celery
-                          (6379, 6379),  # Celery
+                          (5555, 5555),  # Celery (Flower)
+                          (5672, 5672),  # RabbitMQ
+                          (6379, 6379),  # Redis
                           (8080, 8081),
                           (8088, 8088),
                           (8899, 8899),  # Jupyter
@@ -59,8 +60,9 @@ MASTER_UDP_PORT_RANGES = [(111, 111),  # NFS
 
 
 WORKER_TCP_PORT_RANGES = [(22, 22),  # SSH
-                          (5555, 5555),  # Celery
-                          (6379, 6379),  # Celery
+                          (5555, 5555),  # Celery (Flower)
+                          (5672, 5672),  # RabbitMQ
+                          (6379, 6379),  # Redis
                           (8080, 8081), ]
 
 
