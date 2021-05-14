@@ -582,9 +582,9 @@ class Cluster(object):
             self.master = {self.master_name: self.master_instance}
             self.master_instance.create_tags(Tags=[{'Key': 'Name',
                                                     'Value': 'master'}])
-            for i, inst in enumerate(self.worker_instances):
-                zeros = 3 - len(str(i + 1))
-                name = 'node{}{}'.format('0' * zeros, i + 1)
+            for i, inst in enumerate(self.worker_instances, 1):
+                zeros = 3 - len(str(i))
+                name = 'node{}{}'.format('0' * zeros, i)
                 self.workers[name] = inst
                 self.worker_names.append(name)
                 inst.create_tags(Tags=[{'Key': 'Name',
@@ -634,7 +634,7 @@ class Cluster(object):
         while subnet_id in subnet_ids:
             subnet = [s for s in self.vpc.subnets.all() if s.id == subnet_id][0]
             print('Subnet state: {}'.format(subnet.state))
-            time.wait(10)
+            time.sleep(10)
             subnet_ids = [s.id for s in vpc.subnets.all()]
             # print(', '.join(subnet_ids))
         # delete route table
@@ -884,6 +884,7 @@ class Cluster(object):
             self.write_ssh_log(instance, log_prefix, stdout=o, stderr=e)
 
         # build and share an EBS volumne on the master node
+        print('\nbuild {}an EBS volume on the master node...'.format('and share ' if len(self.worker_instances) > 1 else ''))
         if self.master_is_nitro:
             devices = ['/dev/nvme{}n1'.format(i + 1) for i in range(self.opts.master_ebs_vol_num)]
         else:
@@ -894,6 +895,23 @@ class Cluster(object):
             volume = self.format_single_ebs_device(devices[0])
         if len(self.worker_instances) > 0:
             self.share_nfs_volume(volume)
+
+        # start Spark cluster
+        if self.opts.spark and len(self.worker_instances) > 0:
+            print('\nStartig a Spark cluster...')
+            spark_cmd = 'cd /usr/local/spark/conf'
+            spark_cmd += ' && cp spark-env.sh.template spark-env.sh'
+            conf_export_str = "export SPARK_MASTER_HOST='{}'".format(self.master_instance.public_ip_address)
+            conf_export_str += "\nexport JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64/jre"
+            spark_cmd += ' && echo "{}" >> /usr/local/spark/conf/spark-env.sh'.format(conf_export_str)
+            spark_worker_str = '\n'.join(instance_names)
+            spark_cmd += ' && echo "{}" >> /usr/local/spark/conf/slaves'.format(spark_worker_str)
+            spark_cmd += ' && cd /usr/local/spark && ./sbin/start-all.sh'
+            o, e = self.run(self.master_instance, spark_cmd)
+            log_prefix = '/home/ubuntu/.abcloud/log/18-start_spark_cluster'
+            self.write_ssh_log(self.master_instance, log_prefix, stdout=o, stderr=e)
+            print('Spark master UI is available at: http://{}:8080/'.format(self.master_instance.public_ip_address))
+            print('Spark application UI is available at: http://{}:4040/'.format(self.master_instance.public_ip_address))
 
         # start Celery workers on all nodes
         if self.opts.celery and len(self.worker_instances) > 0:
@@ -1128,7 +1146,11 @@ class Cluster(object):
         self.write_ssh_log(self.master_instance, log_prefix, stdout=o, stderr=e)
 
         # start a backgroud Jupyter instance
-        jupyter_start_cmd = "/home/ubuntu/anaconda3/bin/jupyter lab --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
+        # jupyter_start_cmd = "/home/ubuntu/anaconda3/bin/jupyter lab --notebook-dir={} > /dev/null 2>&1 &".format(notebook_dir)
+
+        jupyter_start_cmd = "tmux new-session -d -s jupyter"
+        jupyter_start_cmd += " && tmux send-keys -t jupyter '/home/ubuntu/anaconda3/bin/jupyter lab --notebook-dir={}' C-m".format(notebook_dir)
+
         self.run(self.master_instance, jupyter_start_cmd)
         print("Jupyter notebook URL: http://{}:{}".format(self.master_instance.public_ip_address, 8899))
         print("Password for the Jupyter notebook is '{}'".format(self.opts.jupyter_password))
@@ -1217,6 +1239,7 @@ class Cluster(object):
 
 
 def configure_base_image(ip_address, user, identity_file, debug=False, verbose=False):
+    PATH = '$PATH'
     # Make .abcloud directories
     if verbose:
         print('  - configuring abcloud log directory')
@@ -1248,7 +1271,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     init_cmd = 'sudo debconf-set-selections <<< "postfix postfix/mailname string your.hostname.com"'
     init_cmd += ''' && sudo debconf-set-selections <<< "postfix postfix/main_mailer_type string 'Internet Site'"'''
     init_cmd += ' && sudo apt-get update --fix-missing \
-        && sudo apt-get install -y build-essential wget bzip2 fail2ban htop default-jre \
+        && sudo apt-get install -y build-essential wget bzip2 fail2ban htop default-jre scala \
         ca-certificates libglib2.0-0 libxext6 libsm6 libxrender1 pigz s3cmd git mercurial \
         subversion libtool automake zlib1g-dev libbz2-dev pkg-config muscle mafft cd-hit unzip \
         libfontconfig1 lvm2 mdadm nfs-kernel-server gnupg awscli libxml2-dev libcurl4-openssl-dev \
@@ -1266,18 +1289,17 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     # Anaconda
     if verbose:
         print('  - installing Anaconda')
-    conda_cmd = "echo 'export PATH=/home/ubuntu/anaconda3/bin:$PATH' | sudo tee /etc/profile.d/conda.sh \
+    conda_cmd = 'echo "export PATH=/home/ubuntu/anaconda3/bin:$PATH" | sudo tee /etc/profile.d/conda.sh \
         && cd /tools \
         && wget --quiet https://repo.anaconda.com/archive/Anaconda3-2020.07-Linux-x86_64.sh -O anaconda.sh\
         && /bin/bash ./anaconda.sh -b -p /home/ubuntu/anaconda3 \
         && rm /tools/anaconda.sh \
-        && echo 'export PATH=/home/ubuntu/anaconda3/bin:$PATH' >> /home/ubuntu/.bash_profile \
-        && source /home/ubuntu/.bash_profile \
         && sudo add-apt-repository -y ppa:chronitis/jupyter \
         && sudo apt-get update --fix-missing \
         && sudo apt-get install -y ijulia irkernel ijavascript \
-        && conda install --yes -c binstar redis-server"
+        && conda install --yes -c binstar redis-server'
     o, e = run_ssh(conda_cmd, ip_address, user, identity_file)
+    PATH = '/home/ubuntu/anaconda3/bin:' + PATH
     std_prefix = '/home/ubuntu/.abcloud/log/04-anaconda'
     write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o, stderr=e)
     if debug:
@@ -1518,14 +1540,35 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
 
     # 10x Genomics
     # CellRanger, full reference genomes (mouse and human), and VDJ references (mouse and human)
+    # download
     if verbose:
         print('  - installing CellRanger')
-    # cellranger_cmd = 'cd /tools \
-    #                   && wget https://burtonlab.s3.amazonaws.com/software/cellranger-5.0.1.tar.gz \
-    #                   && tar xzvf cellranger-5.0.1.tar.gz \
-    #                   && echo "export PATH=/tools/cellranger-5.0.1:$PATH" >> /home/ubuntu/.bash_profile \
-    #                   && sudo mkdir /references \
-    #                   && sudo chmod 777 /references'
+        # print('    - downloading')
+    cellranger_cmd = 'cd /tools && wget https://burtonlab.s3.amazonaws.com/software/cellranger-5.0.1.tar.gz'
+    PATH = '/tools/cellranger-5.0.1:' + PATH
+    o1, e1 = run_ssh(cellranger_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nCELLRANGER DOWNLOAD')
+        print(o1)
+        print(e1)
+    
+    # if verbose:
+    #     print('    - decompressing')
+    cellranger_cmd = 'cd /tools && gunzip cellranger-5.0.1.tar.gz && tar xvf cellranger-5.0.1.tar'
+    o1, e1 = run_ssh(cellranger_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nCELLRANGER DECOMPRESS')
+        print(o1)
+        print(e1)
+
+    # if verbose:
+    #     print('    - adding to PATH')
+    # cellranger_cmd = 'echo "export PATH=/tools/cellranger-5.0.1:$PATH" >> /home/ubuntu/.bash_profile'
+    # o1, e1 = run_ssh(cellranger_cmd, ip_address, user, identity_file)
+    # if debug:
+    #     print('\n\nCELLRANGER PATH')
+    #     print(o1)
+    #     print(e1)
     # cellranger_cmd = 'cd /tools \
     #                   && wget https://burtonlab.s3.amazonaws.com/software/cellranger-5.0.1.tar.gz \
     #                   && tar xzvf cellranger-5.0.1.tar.gz \
@@ -1533,25 +1576,51 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     #                   && source /home/ubuntu/.bash_profile \
     #                   && sudo mkdir /references \
     #                   && sudo chmod 777 /references'
-    cellranger_cmd = 'cd /tools \
-                    && wget https://burtonlab.s3.amazonaws.com/software/cellranger-6.0.0.tar.gz \
-                    && gunzip cellranger-6.0.0.tar.gz \
-                    && tar xvf cellranger-6.0.0.tar \
-                    && echo "export PATH=/tools/cellranger-6.0.0:$PATH" >> /home/ubuntu/.bash_profile \
-                    && sudo mkdir /references \
-                    && sudo chmod 777 /references'
-    # cellranger_cmd = 'sudo mkdir /references \
+    # cellranger_cmd = 'cd /tools \
+    #                   && wget https://burtonlab.s3.amazonaws.com/software/cellranger-6.0.0.tar.gz \
+    #                   && tar xzvf cellranger-6.0.0.tar.gz \
+    #                   && echo "export PATH=/tools/cellranger-6.0.0/bin:$PATH" >> /home/ubuntu/.bash_profile \
+    #                   && sudo mkdir /references \
     #                   && sudo chmod 777 /references'
-    o1, e1 = run_ssh(cellranger_cmd, ip_address, user, identity_file)
-    std_prefix = '/home/ubuntu/.abcloud/log/16-10xGenomics'
+    # o1, e1 = run_ssh(cellranger_cmd, ip_address, user, identity_file)
+    # std_prefix = '/home/ubuntu/.abcloud/log/16-10xGenomics'
+    # write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o1, stderr=e1)
+    # if debug:
+    #     print('\n\n10X GENOMICS')
+    #     print(o1)
+    #     print(e1)
+    # # add cellranger path to PATH
+    # if verbose:
+    #     print('  - adding CellRanger to PATH')
+    # cellranger_path_cmd = 'echo "export PATH=/tools/cellranger-6.0.0/bin:$PATH" >> /home/ubuntu/.bash_profile'
+    # # cellranger_cmd = 'sudo mkdir /references \
+    # #                   && sudo chmod 777 /references'
+    # o1, e1 = run_ssh(cellranger_path_cmd, ip_address, user, identity_file)
+    # std_prefix = '/home/ubuntu/.abcloud/log/16-10xGenomics-path'
+    # write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o1, stderr=e1)
+    # if debug:
+    #     print('\n\n10X GENOMICS PATH')
+    #     print(o1)
+    #     print(e1)
+    # make 10x Genomics reference directory
+    # if verbose:
+    #     print('  - making reference directory')
+    rpath_cmd = 'sudo mkdir /references \
+                 && sudo chmod 777 /references'
+    o1, e1 = run_ssh(rpath_cmd, ip_address, user, identity_file)
+    std_prefix = '/home/ubuntu/.abcloud/log/16-10xGenomics-ref-path'
     write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o1, stderr=e1)
     if debug:
-        print('\n\n10X GENOMICS')
+        print('\n\n10X GENOMICS REFERENCE PATH')
         print(o1)
         print(e1)
+
+    # human 10x Genomics reference
     if verbose:
         print('  - downloading and unpacking reference genome (GRCh38)')
-    href_cmd = 'cd /references \
+    href_cmd = 'sudo mkdir /references \
+                && sudo chmod 777 /references \
+                && cd /references \
                 && wget -q https://burtonlab.s3.amazonaws.com/refs/refdata-gex-GRCh38-2020-A.tar.gz \
                 && tar xzvf refdata-gex-GRCh38-2020-A.tar.gz'
     o2, e2 = run_ssh(href_cmd, ip_address, user, identity_file)
@@ -1561,6 +1630,8 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     #             && wget -q http://burtonlab.s3.amazonaws.com/refs/refdata-cellranger-mm10-3.0.0.tar.gz \
     #             && tar xzvf refdata-cellranger-mm10-3.0.0.tar.gz'
     # o3, e3 = run_ssh(mref_cmd, ip_address, user, identity_file)
+
+    # human 10x Genomics VDJ reference
     if verbose:
         print('  - downloading and unpacking VDJ reference (GRCh38)')
     hvdj_cmd = 'cd /references \
@@ -1587,6 +1658,26 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
         print('\n\nSCANPY')
         print(o)
         print(e)
+
+    # Spark
+    if verbose:
+        print('  - installing Spark')
+    spark_cmd = 'cd /tools \
+                 && /home/ubuntu/anaconda3/bin/pip install py4j \
+                 && wget https://burtonlab.s3.amazonaws.com/software/spark-3.1.1-bin-hadoop2.7.tgz \
+                 && tar xzvf spark-3.1.1-bin-hadoop2.7.tgz \
+                 && sudo mv /tools/spark-3.1.1-bin-hadoop2.7 /usr/local/spark \
+                 && echo "export SPARK_HOME=/usr/local/spark" >> /home/ubuntu/.bash_profile \
+                 && echo "export PYTHONPATH=/usr/local/spark" >> /home/ubuntu/.bash_profile'
+    PATH = '/usr/local/spark:/usr/local/spark/bin:' + PATH
+    o, e = run_ssh(spark_cmd, ip_address, user, identity_file)
+    # std_prefix = '/home/ubuntu/.abcloud/log/18-spark'
+    # write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o, stderr=e)
+    if debug:
+        print('\n\nSPARK')
+        print(o)
+        print(e)
+
     
     # R and Bioconductor
     if verbose:
@@ -1600,7 +1691,7 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     r_cmd += "&& R -e 'IRkernel::installspec()' "
     r_cmd += """&& R -e 'install.packages(c("BiocManager", "devtools"), repos="http://cran.us.r-project.org")' """
     o, e = run_ssh(r_cmd, ip_address, user, identity_file)
-    std_prefix = '/home/ubuntu/.abcloud/log/18-R'
+    std_prefix = '/home/ubuntu/.abcloud/log/19-R'
     write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o, stderr=e)
     if debug:
         print('\n\nR')
@@ -1618,12 +1709,22 @@ def configure_base_image(ip_address, user, identity_file, debug=False, verbose=F
     seurat_cmd += """&& R -e 'BiocManager::install({})' """.format(bc_pkgs)
     seurat_cmd += """&& R -e 'devtools::install_github({})'""".format(gh_pkgs)
     o, e = run_ssh(r_cmd, ip_address, user, identity_file)
-    std_prefix = '/home/ubuntu/.abcloud/log/18-R'
+    std_prefix = '/home/ubuntu/.abcloud/log/20-Seurat'
     write_ssh_log(std_prefix, ip_address, user, identity_file, stdout=o, stderr=e)
     if debug:
         print('\n\nR')
         print(o)
         print(e)
+
+    # PATH
+    if verbose:
+        print('  - updating PATH')
+    path_cmd = 'echo "export PATH={}" >> /home/ubuntu/.bash_profile'.format(PATH)
+    o1, e1 = run_ssh(path_cmd, ip_address, user, identity_file)
+    if debug:
+        print('\n\nPATH')
+        print(o1)
+        print(e1)
 
 
 def run_ssh(cmd, ip_address, user, identity_file, stdin=None):
